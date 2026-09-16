@@ -10,6 +10,10 @@ management screen, a second launcher icon, where you scan, pair, connect, and re
 Waze's own resources completely untouched and swaps in only patched code, so the app behaves exactly as it did
 apart from the extra link to the cluster.
 
+![Waze's next turn mirrored on a Kawasaki TFT cluster: a right turn in 30 m shown on the dash beside the same cue on the phone](docs/example-cluster.jpg)
+
+*The next turn shows on the cluster, so you can skip the phone mount: ride by the dash alone, or pair an intercom for spoken directions too, with the phone locked in your pocket.*
+
 > **Before you install:** this is not a one-tap, download-and-run app. No one is allowed to give
 > you a ready-made copy, because Waze's app cannot be legally redistributed. You download your own
 > copy of Waze and patch it on a computer, then send the patched result to your phone with `adb`,
