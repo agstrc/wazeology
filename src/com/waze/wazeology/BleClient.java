@@ -32,15 +32,26 @@ public final class BleClient {
         void onStateChanged(State state);
         /** The link dropped or a connection attempt failed without the app asking for it. */
         void onLinkLost(BluetoothDevice device);
+        /** The device answered but is not a BLE5 cluster (or its GATT cache was stale): drop it as a
+         *  target rather than wait for it again. */
+        void onRejected(BluetoothDevice device);
     }
 
-    public enum State { IDLE, CONNECTING, BONDING, SUBSCRIBING, INITIALIZING, READY }
+    /** WAITING is a passive (autoConnect) handle with no link yet; it hops to CONNECTING when the link
+     *  comes up, after which passive and direct share every step. */
+    public enum State { IDLE, WAITING, CONNECTING, BONDING, SUBSCRIBING, INITIALIZING, READY }
 
     private static final int REQUESTED_MTU = 300;
+    private static final int MIN_USABLE_MTU = 48;          // largest frame (45 B init) + 3 B ATT write header
     private static final long RESPONSE_TIMEOUT_MS = 3250L;   // how long to wait for a command's ACK
     private static final long METER_TICK_MS = 5000L;         // periodic meter-indication keepalive
     private static final long INTER_COMMAND_GAP_MS = 50L;    // spacing between queued control-point writes
     private static final long CCCD_RETRY_MS = 500L;          // retry delay when a notification enable is rejected
+    // Watchdogs for the transient states: a step that stalls without any callback ends the attempt.
+    private static final long CONNECT_TIMEOUT_MS = 30000L;   // connect + service discovery + MTU
+    private static final long BOND_TIMEOUT_MS = 90000L;      // passkey entry on the phone
+    private static final long SUBSCRIBE_TIMEOUT_MS = 15000L; // all CCCD writes
+    private static final long INIT_TIMEOUT_MS = 30000L;      // silence between init commands (re-armed per command)
 
     private final Context context;
     private final Listener listener;
@@ -56,6 +67,9 @@ public final class BleClient {
     private int subscribeIndex;
     private boolean bondReceiverRegistered;
     private Capabilities capabilities;
+    // Per-handle progress toward the MTU step; the stack may deliver onMtuChanged before discovery.
+    private boolean servicesDiscovered;
+    private boolean mtuSeen;
 
     public BleClient(Context context, Listener listener) {
         this.context = context;
@@ -77,6 +91,13 @@ public final class BleClient {
                 log("no response to " + current.label + " after " + (RESPONSE_TIMEOUT_MS / 1000.0) + " s, continuing");
             }
             finishCurrent();
+        }
+    };
+
+    private final Runnable setupTimeout = new Runnable() {
+        @Override
+        public void run() {
+            abandon("timed out while " + state + "; giving up this attempt");
         }
     };
 
@@ -114,35 +135,97 @@ public final class BleClient {
             } else if (bond == BluetoothDevice.BOND_BONDED) {
                 log("bonded");
                 unregisterBondReceiver();
-                if (state == State.BONDING) {
+                if (state != State.BONDING) {
+                    return;
+                }
+                if (gatt == null) {
+                    // The stack dropped the link while the passkey was being entered; reopen it now that
+                    // the bond exists so afterMtu takes the already-bonded path.
+                    openGatt(false);
+                } else {
                     startSubscribe();
                 }
             } else if (bond == BluetoothDevice.BOND_NONE) {
-                log("bonding failed or was cancelled");
-                disconnect();
+                abandon("bonding failed or was cancelled");
             }
         }
     };
 
+    /** Forces one direct connection attempt (high-duty scan, ~30 s stack timeout). */
     public void connect(BluetoothDevice target) {
         disconnect();
         device = target;
-        setState(State.CONNECTING);
-        log("connecting to " + target.getAddress() + " over LE");
-        gatt = target.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE);
-        if (gatt == null) {
-            log("connectGatt returned null (is Bluetooth off?)");
-            disconnect();
-            listener.onLinkLost(target);
+        openGatt(false);
+    }
+
+    /** Arms a passive link: the stack connects whenever the (bonded) device appears. No timeout. */
+    public void waitFor(BluetoothDevice target) {
+        disconnect();
+        device = target;
+        openGatt(true);
+    }
+
+    /** The single opener for both modes. They differ only in the autoConnect flag here and in the
+     *  WAITING -> CONNECTING hop when the link comes up; also used by the post-bond reopen. */
+    private void openGatt(boolean autoConnect) {
+        BluetoothDevice target = device;
+        setState(autoConnect ? State.WAITING : State.CONNECTING);
+        log((autoConnect ? "waiting for " : "connecting to ") + target.getAddress()
+            + (autoConnect ? " (passive)" : " over LE"));
+        BluetoothGatt g = null;
+        try {
+            g = target.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE);
+        } catch (SecurityException e) {
+            log("connectGatt needs the Bluetooth permission granted");
+        }
+        gatt = g;
+        if (g == null) {
+            abandon("no GATT handle (is Bluetooth off?)");
         }
     }
 
     public void disconnect() {
+        closeGatt();
+        unregisterBondReceiver();
+        setState(State.IDLE);
+    }
+
+    private void abandon(String reason) {
+        abandon(reason, false);
+    }
+
+    /** Drops the stack's cached service table for this device so the next discovery is a real one
+     *  (hidden API, same reflective pattern as removeBond; a failure just leaves the cache alone). */
+    private void refreshCache(BluetoothGatt g) {
+        try {
+            g.getClass().getMethod("refresh").invoke(g);
+        } catch (Throwable ignored) {
+            // not available on this stack
+        }
+    }
+
+    /** Ends the current attempt and hands the outcome to the bridge, which decides whether to wait again;
+     *  {@code rejected} marks a device that answered but is not a cluster. */
+    private void abandon(String reason, boolean rejected) {
+        log(reason);
+        BluetoothDevice lost = device;
+        disconnect();
+        if (lost == null) {
+            return;
+        }
+        if (rejected) {
+            listener.onRejected(lost);
+        } else {
+            listener.onLinkLost(lost);
+        }
+    }
+
+    /** Tears down the GATT handle and in-flight commands only; bond receiver and state are left alone. */
+    private void closeGatt() {
         main.removeCallbacks(responseTimeout);
         main.removeCallbacks(meterTick);
         queue.clear();
         current = null;
-        unregisterBondReceiver();
         if (gatt != null) {
             gatt.disconnect();
             gatt.close();
@@ -150,7 +233,8 @@ public final class BleClient {
         }
         gatt = null;
         capabilities = null;
-        setState(State.IDLE);
+        servicesDiscovered = false;
+        mtuSeen = false;
     }
 
     public void sendTurnByTurn(String label, FlagMode flag, TurnType turn, DistanceUnit unit, int distance) {
@@ -236,6 +320,11 @@ public final class BleClient {
     private void finishCurrent() {
         main.removeCallbacks(responseTimeout);
         current = null;
+        if (state == State.INITIALIZING) {
+            // Progress-based: the 13-command init sequence can legitimately take longer than any single
+            // deadline when the cluster ignores opcodes, so the watchdog only fires when nothing moves.
+            armSetupTimeout(State.INITIALIZING);
+        }
         pump();
     }
 
@@ -278,6 +367,12 @@ public final class BleClient {
     }
 
     private void afterMtu() {
+        // The MTU step is only reachable from CONNECTING. A re-delivered onMtuChanged (remote MTU
+        // renegotiation) or a rediscovery on a live link must not re-bond or re-run the subscribe/init.
+        if (state != State.CONNECTING) {
+            log("ignoring MTU/discovery callback in state " + state);
+            return;
+        }
         BluetoothDevice target = device;
         if (target == null) {
             return;
@@ -360,15 +455,23 @@ public final class BleClient {
                     return;
                 }
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    if (state == State.WAITING) {
+                        setState(State.CONNECTING); // passive and direct share everything from here
+                    }
                     log("connected (status " + status + "), discovering services");
                     g.discoverServices();
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    log("disconnected by remote or stack, status " + status);
-                    BluetoothDevice lost = device;
-                    disconnect();
-                    if (lost != null) {
-                        listener.onLinkLost(lost);
+                    if (state == State.BONDING && device != null
+                            && device.getBondState() == BluetoothDevice.BOND_BONDING) {
+                        // Android often drops the ACL while createBond runs the encryption handshake. The
+                        // bond continues at the OS level, so keep BONDING and the receiver; BOND_BONDED
+                        // reopens the link, BOND_NONE tears it down. Only wait when the OS really is
+                        // mid-bond: if createBond never started one, nothing would ever fire.
+                        log("link dropped while pairing (status " + status + "); waiting for bonding to finish");
+                        closeGatt();
+                        return;
                     }
+                    abandon("disconnected by remote or stack, status " + status);
                 }
             });
         }
@@ -379,10 +482,28 @@ public final class BleClient {
                 if (g != gatt) {
                     return;
                 }
+                if (state != State.CONNECTING) {
+                    // A spontaneous rediscovery on a live link must not tear it down or re-request the MTU.
+                    log("ignoring service discovery in state " + state);
+                    return;
+                }
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    // Transient (common right after a fresh bond while the GATT cache refreshes).
+                    abandon("service discovery failed, status " + status);
+                    return;
+                }
                 if (g.getService(Kawasaki.SERVICE) == null) {
+                    // Also the shape of a stale, empty GATT cache right after a re-bond, so the bridge decides:
+                    // an unbonded non-cluster is dropped, a bonded target is waited for again.
                     String servicePrefix = Kawasaki.SERVICE.toString().substring(0, 8);
-                    log("BLE5 service " + servicePrefix + " not found; this is not a BLE5 cluster");
-                    disconnect();
+                    refreshCache(g);
+                    abandon("BLE5 service " + servicePrefix + " not found; not a BLE5 cluster, or a stale cache", true);
+                    return;
+                }
+                servicesDiscovered = true;
+                if (mtuSeen) {
+                    log("BLE5 cluster service found, MTU already negotiated");
+                    afterMtu();
                     return;
                 }
                 log("BLE5 cluster service found, requesting MTU " + REQUESTED_MTU);
@@ -399,6 +520,17 @@ public final class BleClient {
                     return;
                 }
                 log("MTU " + mtu + " (status " + status + ")");
+                // Only an early (pre-discovery) exchange is deferred on; a failed or tiny one must not
+                // stop onServicesDiscovered from requesting ours. In the normal ordering the callback
+                // proceeds regardless of status, as before.
+                mtuSeen = status == BluetoothGatt.GATT_SUCCESS && mtu >= MIN_USABLE_MTU;
+                if (!servicesDiscovered) {
+                    // Delivered ahead of discovery (Android 14 fans MTU changes out to every client on
+                    // the ACL). Subscribing now would run against an empty service table and reach
+                    // READY with nothing enabled; onServicesDiscovered picks the step up instead.
+                    log("MTU arrived before service discovery; waiting for services");
+                    return;
+                }
                 afterMtu();
             });
         }
@@ -473,7 +605,9 @@ public final class BleClient {
         }
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(bondReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            // Sent by the Bluetooth app (not system_server), which a NOT_EXPORTED receiver can miss on 33+.
+            // It is a protected broadcast, so only privileged senders can emit it: EXPORTED is safe.
+            context.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             context.registerReceiver(bondReceiver, filter);
         }
@@ -497,7 +631,32 @@ public final class BleClient {
             return;
         }
         state = next;
+        armSetupTimeout(next);
         listener.onStateChanged(next);
+    }
+
+    /** Re-arms the watchdog for a transient state, or clears it for IDLE / READY. It deliberately
+     *  survives the mid-bond closeGatt (state stays BONDING), the one case that could otherwise wait forever. */
+    private void armSetupTimeout(State s) {
+        main.removeCallbacks(setupTimeout);
+        long ms;
+        switch (s) {
+            case CONNECTING:
+                ms = CONNECT_TIMEOUT_MS;
+                break;
+            case BONDING:
+                ms = BOND_TIMEOUT_MS;
+                break;
+            case SUBSCRIBING:
+                ms = SUBSCRIBE_TIMEOUT_MS;
+                break;
+            case INITIALIZING:
+                ms = INIT_TIMEOUT_MS;
+                break;
+            default:
+                return;
+        }
+        main.postDelayed(setupTimeout, ms);
     }
 
     private void log(String line) {

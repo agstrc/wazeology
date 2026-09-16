@@ -172,7 +172,9 @@ Wazeology needs a UI. An Activity must be declared in the manifest, but we must 
 No foreground `Service` is used (Waze's manifest lacks `FOREGROUND_SERVICE_CONNECTED_DEVICE`, and adding it
 would mean touching permissions). Instead `ClusterBridge` is a **process-wide singleton** obtained via
 reflection (`ActivityThread.currentApplication()`), so the smali hooks can feed it even before the screen is
-opened. The BLE link lives as long as the Waze process; it reconnects on next launch from a saved MAC.
+opened. The BLE link lives as long as the Waze process. A saved, bonded motorcycle is waited for **passively**
+(an `autoConnect=true` GATT handle, so the stack links up whenever the bike appears, with no retry timer);
+"Connect" forces one direct attempt, "Disconnect" pauses the wait until the next launch, and "Forget" drops it.
 
 ### 5.1 A distinct launcher icon without a new resource
 

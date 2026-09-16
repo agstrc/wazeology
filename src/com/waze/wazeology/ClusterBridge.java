@@ -7,8 +7,12 @@ import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
@@ -37,7 +41,8 @@ public final class ClusterBridge implements BleClient.Listener {
 
     private static final long KEEPALIVE_MS = 5000L;
     private static final long MIN_SEND_INTERVAL_MS = 1000L;
-    private static final long RECONNECT_DELAY_MS = 4000L;
+    private static final long REARM_DELAY_MS = 4000L;      // spacing between passive re-arms after a stack failure
+    private static final int MAX_REJECTIONS = 2;           // second looks for a bonded device with a stale service table
     private static final long SCAN_TIMEOUT_MS = 15000L;
     private static final String PREFS = "waze_motorcycle";
     private static final String KEY_MAC = "mac";
@@ -95,9 +100,11 @@ public final class ClusterBridge implements BleClient.Listener {
     private ScanCallback scanCallback;
     private final Map<String, BluetoothDevice> found = new LinkedHashMap<>();
 
-    // Reconnect state.
-    private BluetoothDevice reconnectTarget;
-    private boolean reconnecting;
+    // Link target: the bonded motorcycle we intend to be linked to. A passive (autoConnect) handle is
+    // pending whenever the process is up, unless paused by Disconnect (in-memory, so a relaunch resumes).
+    private BluetoothDevice target;
+    private boolean paused;
+    private int rejections; // "not a cluster" answers from the current target; reset on connect / READY
 
     private ClusterBridge(Context appCtx) {
         this.context = appCtx;
@@ -108,15 +115,11 @@ public final class ClusterBridge implements BleClient.Listener {
             logLines.addLast(l);
         }
         main.post(keepalive);
-        // Reconnect-on-next-launch: if we have a saved, still-bonded motorcycle, bring the link back up.
-        String mac = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MAC, null);
-        if (mac != null) {
-            BluetoothDevice dev = bondedByMac(mac);
-            if (dev != null) {
-                log("auto-reconnecting to saved motorcycle " + mac);
-                connect(dev);
-            }
-        }
+        // A saved, still-bonded motorcycle is waited for passively from the moment the process is up
+        // (ensurePassive resolves it from prefs; see resolveTarget for why that is lazy).
+        registerAdapterReceiver();
+        // The first get() can come from a Waze hook thread; BleClient state is main-thread only.
+        main.post(this::ensurePassive);
     }
 
     // ---- singleton / static feed API used by the hooks ----------------------------------------
@@ -211,15 +214,40 @@ public final class ClusterBridge implements BleClient.Listener {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MAC, null) != null;
     }
 
-    /** True while the bonded-only retry loop is running after a dropped link. */
-    public boolean isReconnecting() {
-        return reconnecting;
+    /** True once the saved motorcycle resolves to a bonded device (the one we wait for / connect to). */
+    public boolean hasTarget() {
+        return resolveTarget() != null;
+    }
+
+    /** Lazily (re)resolves the saved MAC to a bonded device. The constructor can run before
+     *  BLUETOOTH_CONNECT is granted, and a failed unbonded scan-tap clears the target, so this is retried
+     *  whenever the target is needed rather than fixed once at launch. */
+    private BluetoothDevice resolveTarget() {
+        BluetoothDevice dev = target;
+        if (dev == null) {
+            String mac = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MAC, null);
+            if (mac != null) {
+                dev = bondedByMac(mac);
+                target = dev;
+            }
+        }
+        return dev;
+    }
+
+    /** True after Disconnect: the passive wait is off until Connect or the next Waze launch. */
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public boolean isBluetoothOn() {
+        BluetoothAdapter adapter = adapter();
+        return adapter != null && adapter.isEnabled();
     }
 
     /** Human label for the device we intend to be linked to: the live target's name/address, else the
      *  saved name, else the saved MAC. Null only when nothing is targeted and nothing is remembered. */
     public String currentTargetLabel() {
-        BluetoothDevice dev = reconnectTarget;
+        BluetoothDevice dev = target;
         if (dev != null) {
             try {
                 String name = dev.getName();
@@ -279,14 +307,22 @@ public final class ClusterBridge implements BleClient.Listener {
             // Unfiltered scan for robustness; we match on name / advertised UUID in `consider`.
             scanner.startScan(null, settings, scanCallback);
             log("scanning for the motorcycle...");
-            main.postDelayed(this::stopScan, SCAN_TIMEOUT_MS);
+            main.postDelayed(scanTimeout, SCAN_TIMEOUT_MS);
         } catch (SecurityException e) {
             log("scan needs the Bluetooth/Location permissions granted");
         }
     }
 
+    // A stored Runnable so removeCallbacks matches; `this::stopScan` allocates a fresh object each call.
+    private final Runnable scanTimeout = new Runnable() {
+        @Override
+        public void run() {
+            stopScan();
+        }
+    };
+
     public void stopScan() {
-        main.removeCallbacks(this::stopScan);
+        main.removeCallbacks(scanTimeout);
         if (scanner != null && scanCallback != null) {
             try {
                 scanner.stopScan(scanCallback);
@@ -338,22 +374,103 @@ public final class ClusterBridge implements BleClient.Listener {
 
     // ---- connect / disconnect / forget ---------------------------------------------------------
 
+    /** Forces one direct attempt at {@code device} (scan-row tap or the Connect button). It becomes the
+     *  target; a failure falls back to the passive wait through onLinkLost. */
     public void connect(BluetoothDevice device) {
         stopScan();
-        stopReconnecting();
-        reconnectTarget = device;
-        ble.connect(device);
+        main.removeCallbacks(rearm);
+        paused = false;
+        rejections = 0;
+        target = device;
+        try {
+            ble.connect(device);
+        } catch (SecurityException e) {
+            log("connecting needs the Bluetooth permission granted");
+        }
     }
 
+    /** The Connect button: a direct attempt at the current target. */
+    public void connectNow() {
+        BluetoothDevice dev = resolveTarget();
+        if (dev != null) {
+            connect(dev);
+        }
+    }
+
+    /** The Disconnect button: drops the link and pauses the passive wait until Connect or the next launch. */
     public void disconnect() {
-        reconnectTarget = null;
-        stopReconnecting();
+        paused = true;
+        main.removeCallbacks(rearm);
         ble.disconnect();
     }
 
+    /**
+     * Arms the passive link if there is a target and nothing is pending. Idempotent; called at launch, after
+     * a link loss (via {@link #rearm}), when Bluetooth comes back on, and once permissions are granted.
+     */
+    public void ensurePassive() {
+        BluetoothDevice dev = resolveTarget();
+        if (dev == null || paused || ble.getState() != BleClient.State.IDLE) {
+            return;
+        }
+        if (!isBluetoothOn()) {
+            log("bluetooth is off; will wait for " + currentTargetLabel() + " once it is back on");
+            return;
+        }
+        if (!isBonded(dev)) {
+            // Waiting for an unbonded device would pop the passkey dialog unprompted whenever it appears
+            // (e.g. a Bluetooth toggle mid-pairing). The saved MAC re-resolves only once bonded.
+            log("target is not bonded; not waiting for it");
+            target = null;
+            return;
+        }
+        try {
+            ble.waitFor(dev);
+        } catch (SecurityException e) {
+            log("waiting needs the Bluetooth permission granted; open Wazeology to grant it");
+        }
+    }
+
+    private final Runnable rearm = new Runnable() {
+        @Override
+        public void run() {
+            ensurePassive();
+        }
+    };
+
+    /** Bluetooth off kills every handle silently; on brings the passive wait back without user action. */
+    private void registerAdapterReceiver() {
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent intent) {
+                int st = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
+                if (st == BluetoothAdapter.STATE_ON) {
+                    log("bluetooth on");
+                    ensurePassive();
+                } else if (st == BluetoothAdapter.STATE_TURNING_OFF || st == BluetoothAdapter.STATE_OFF) {
+                    // Close on TURNING_OFF, before the stack's own DISCONNECTED callbacks land, so they are
+                    // rejected as stale instead of reaching onLinkLost with an unreadable bond state.
+                    if (ble.getState() != BleClient.State.IDLE) {
+                        log("bluetooth off");
+                    }
+                    ble.disconnect();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Protected broadcast; EXPORTED for the same reason as the bond receiver in BleClient.
+            context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            context.registerReceiver(receiver, filter);
+        }
+    }
+
     public void forget() {
-        BluetoothDevice dev = reconnectTarget;
-        disconnect();
+        BluetoothDevice dev = target;
+        target = null;
+        main.removeCallbacks(rearm);
+        ble.disconnect();
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove(KEY_MAC).remove(KEY_NAME).apply();
         if (dev != null) {
@@ -365,23 +482,6 @@ public final class ClusterBridge implements BleClient.Listener {
             }
         }
     }
-
-    private void stopReconnecting() {
-        main.removeCallbacks(reconnect);
-        reconnecting = false;
-    }
-
-    private final Runnable reconnect = new Runnable() {
-        @Override
-        public void run() {
-            BluetoothDevice target = reconnectTarget;
-            if (target == null) {
-                return;
-            }
-            log("reconnecting to " + target.getAddress());
-            ble.connect(target);
-        }
-    };
 
     // ---- Waze feed (called via the static wrappers from the hooks) -----------------------------
 
@@ -599,15 +699,14 @@ public final class ClusterBridge implements BleClient.Listener {
     @Override
     public void onStateChanged(BleClient.State bleState) {
         if (bleState == BleClient.State.READY) {
-            if (reconnecting) {
-                log("reconnected");
-            }
-            stopReconnecting();
-            if (reconnectTarget != null) {
+            main.removeCallbacks(rearm);
+            rejections = 0;
+            BluetoothDevice dev = target;
+            if (dev != null) {
                 SharedPreferences.Editor e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                    .putString(KEY_MAC, reconnectTarget.getAddress());
+                    .putString(KEY_MAC, dev.getAddress());
                 try {
-                    String name = reconnectTarget.getName();
+                    String name = dev.getName();
                     if (name != null) {
                         e.putString(KEY_NAME, name);
                     }
@@ -627,24 +726,66 @@ public final class ClusterBridge implements BleClient.Listener {
         }
     }
 
-    // Only a bonded motorcycle is retried; an unbonded one would re-pop the passkey prompt on every attempt.
+    // Only a bonded motorcycle is waited for; an unbonded one would re-pop the passkey prompt on every attempt.
     @Override
     public void onLinkLost(BluetoothDevice device) {
-        if (reconnectTarget == null || !reconnectTarget.getAddress().equals(device.getAddress())) {
+        BluetoothDevice dev = target;
+        if (dev == null || !dev.getAddress().equals(device.getAddress())) {
             return;
         }
-        if (device.getBondState() != BluetoothDevice.BOND_BONDED) {
-            log("link lost before pairing finished; not reconnecting");
-            reconnectTarget = null;
-            stopReconnecting();
+        if (!isBluetoothOn()) {
+            // getBondState() reads BOND_NONE while the adapter is off; keep the target, STATE_ON re-arms.
+            log("link lost with bluetooth off; waiting for " + currentTargetLabel() + " once it is back on");
             return;
         }
-        if (!reconnecting) {
-            log("link lost; retrying every " + (RECONNECT_DELAY_MS / 1000) + " s until reconnected or disconnected");
+        if (!isBonded(device)) {
+            log("link lost and not bonded; not waiting for it");
+            dropTarget();
+            return;
         }
-        reconnecting = true;
-        main.removeCallbacks(reconnect);
-        main.postDelayed(reconnect, RECONNECT_DELAY_MS);
+        if (paused) {
+            return;
+        }
+        log("link lost; waiting for " + currentTargetLabel());
+        // Spaced so a misbehaving adapter (instant failures) cannot hot-loop; the wait itself has no timer.
+        main.removeCallbacks(rearm);
+        main.postDelayed(rearm, REARM_DELAY_MS);
+    }
+
+    @Override
+    public void onRejected(BluetoothDevice device) {
+        BluetoothDevice dev = target;
+        if (dev == null || !dev.getAddress().equals(device.getAddress())) {
+            return;
+        }
+        // A bonded device gets a second look: right after a bond the stack can hand back an empty, stale
+        // service table (BleClient refreshes the cache before reporting). A device that keeps being
+        // rejected is not the cluster; a first-ever pairing is unsaved, so this is its only retry path.
+        if (isBonded(device) && rejections < MAX_REJECTIONS) {
+            rejections++;
+            log("not recognised as a cluster; retrying after the service cache refreshes");
+            main.removeCallbacks(rearm);
+            main.postDelayed(rearm, REARM_DELAY_MS);
+            return;
+        }
+        dropTarget();
+    }
+
+    /** Forgets the live target (not the saved MAC). The next re-arm re-resolves the saved motorcycle, so a
+     *  failed tap on some other device (or a stale-cache rejection of the bike itself) falls back to it
+     *  instead of stranding the screen on "Waiting" with nothing armed. */
+    private void dropTarget() {
+        target = null;
+        main.removeCallbacks(rearm);
+        main.postDelayed(rearm, REARM_DELAY_MS);
+    }
+
+    private static boolean isBonded(BluetoothDevice device) {
+        try {
+            return device.getBondState() == BluetoothDevice.BOND_BONDED;
+        } catch (SecurityException e) {
+            return false; // needs BLUETOOTH_CONNECT; nothing can be waited for without it anyway
+        }
     }
 
     // ---- helpers -------------------------------------------------------------------------------

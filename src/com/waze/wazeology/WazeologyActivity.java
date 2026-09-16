@@ -43,9 +43,10 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     private static final int REQ_PERMS = 41;
     private static final int LOG_VIEW_MAX_CHARS = 6000;
 
-    /** UI states derived deterministically from (BleClient.State, hasSavedDevice, isReconnecting). */
+    /** UI states derived deterministically from (BleClient.State, hasTarget, isPaused, hasSavedDevice,
+     *  isBluetoothOn). */
     private enum UiState {
-        DISCONNECTED_FRESH, DISCONNECTED_REMEMBERED, CONNECTING, PAIRING, RECONNECTING, CONNECTED
+        NONE, SAVED_UNBONDED, OFFLINE, PAUSED, WAITING, CONNECTING, PAIRING, CONNECTED
     }
 
     private ClusterBridge bridge;
@@ -193,7 +194,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         progressBar.setLayoutParams(pbLp);
         connCard.addView(progressBar);
 
-        // One contextual primary action (Scan / Cancel / Stop / Disconnect) + a secondary Forget.
+        // One contextual primary action (Scan / Connect / Disconnect) + a secondary Forget.
         primaryBtn = filledButton("Scan for motorcycle");
         connCard.addView(primaryBtn);
         forgetBtn = outlinedButton("Forget");
@@ -327,7 +328,8 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     @Override
     protected void onResume() {
         super.onResume();
-        ensurePermissionsThen(null);
+        // Also covers a fresh install, where the bridge was built before BLUETOOTH_CONNECT was granted.
+        ensurePermissionsThen(bridge::ensurePassive);
     }
 
     @Override
@@ -380,6 +382,9 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
             }
         }
         appendLog(allGranted ? "permissions granted" : "some permissions denied; scanning/connecting may fail");
+        if (allGranted) {
+            bridge.ensurePassive();
+        }
     }
 
     // ---- ClusterBridge.Ui (all on main thread) ----------------------------------------------------
@@ -428,21 +433,29 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     // ---- state -> UI (single render path) ------------------------------------------------------
 
     private UiState deriveUiState() {
-        BleClient.State s = mState;
-        if (s == BleClient.State.READY) {
-            return UiState.CONNECTED;
+        switch (mState) {
+            case READY:
+                return UiState.CONNECTED;
+            case BONDING:
+                return UiState.PAIRING;
+            case WAITING:
+                return UiState.WAITING;
+            case CONNECTING:
+            case SUBSCRIBING:
+            case INITIALIZING:
+                return UiState.CONNECTING;
+            default:
+                break;
         }
-        if (s == BleClient.State.BONDING) {
-            return UiState.PAIRING;
+        // IDLE. Bluetooth off is checked first: the bonded set is empty then, so no target can resolve.
+        if (!bridge.isBluetoothOn() && bridge.hasSavedDevice()) {
+            return UiState.OFFLINE;
         }
-        if (bridge.isReconnecting()) {
-            return UiState.RECONNECTING;
+        // With a target this is either paused or the brief gap before a re-arm.
+        if (bridge.hasTarget()) {
+            return bridge.isPaused() ? UiState.PAUSED : UiState.WAITING;
         }
-        if (s == BleClient.State.CONNECTING || s == BleClient.State.SUBSCRIBING
-                || s == BleClient.State.INITIALIZING) {
-            return UiState.CONNECTING;
-        }
-        return bridge.hasSavedDevice() ? UiState.DISCONNECTED_REMEMBERED : UiState.DISCONNECTED_FRESH;
+        return bridge.hasSavedDevice() ? UiState.SAVED_UNBONDED : UiState.NONE;
     }
 
     /** Renders every control from the current state. Idempotent; safe to call from any Ui callback. */
@@ -453,7 +466,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         Capabilities caps = bridge.capabilities();
         boolean unsupported = caps != null && !caps.navigationSupported;
         UiState u = deriveUiState();
-        boolean busy = u == UiState.CONNECTING || u == UiState.PAIRING || u == UiState.RECONNECTING;
+        boolean busy = u == UiState.CONNECTING || u == UiState.PAIRING || u == UiState.WAITING;
 
         // Status dot: grey at rest, primary (pulsing) while busy, steady primary when connected, error modifier.
         int dotColor = unsupported ? palette.error
@@ -474,17 +487,24 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
             case PAIRING:
                 label = "Pairing — enter passkey";
                 break;
-            case RECONNECTING:
-                label = "Reconnecting to " + targetName() + "…";
+            case WAITING:
+                label = "Waiting for " + targetName() + "…";
                 break;
             case CONNECTING:
                 label = mState == BleClient.State.SUBSCRIBING ? "Subscribing…"
-                    : mState == BleClient.State.INITIALIZING ? "Initializing…" : "Connecting…";
+                    : mState == BleClient.State.INITIALIZING ? "Initializing…"
+                    : "Connecting to " + targetName() + "…";
                 break;
-            case DISCONNECTED_REMEMBERED:
-                label = "Saved: " + targetName() + " — not connected";
+            case PAUSED:
+                label = "Saved: " + targetName() + " — disconnected";
                 break;
-            case DISCONNECTED_FRESH:
+            case OFFLINE:
+                label = "Saved: " + targetName() + " — Bluetooth off";
+                break;
+            case SAVED_UNBONDED:
+                label = "Saved: " + targetName() + " — needs pairing";
+                break;
+            case NONE:
             default:
                 label = "Not connected";
                 break;
@@ -506,9 +526,9 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
         passkeyBanner.setVisibility(u == UiState.PAIRING ? View.VISIBLE : View.GONE);
 
-        // Progress strip: determinate step ladder while connecting, indeterminate while reconnecting,
+        // Progress strip: determinate step ladder while connecting, indeterminate while waiting,
         // fill-to-100 then collapse when it goes READY, hidden at rest.
-        if (u == UiState.RECONNECTING) {
+        if (u == UiState.WAITING) {
             progressBar.setIndeterminate(true);
             progressBar.setVisibility(View.VISIBLE);
         } else if (u == UiState.CONNECTING || u == UiState.PAIRING) {
@@ -526,28 +546,36 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
             progressBar.setProgress(0);
         }
 
-        // Contextual primary action.
+        // Contextual primary action. No Stop/Cancel: a saved motorcycle is waited for until Forget.
+        boolean primaryEnabled = true;
         switch (u) {
             case CONNECTED:
                 setPrimary("Disconnect", v -> bridge.disconnect());
                 break;
-            case RECONNECTING:
-                setPrimary("Stop", v -> bridge.disconnect());
+            case WAITING:
+                setPrimary("Connect now", v -> ensurePermissionsThen(bridge::connectNow));
                 break;
+            case PAUSED:
+                setPrimary("Connect", v -> ensurePermissionsThen(bridge::connectNow));
+                break;
+            case OFFLINE:
             case CONNECTING:
             case PAIRING:
-                setPrimary("Cancel", v -> bridge.disconnect());
+                setPrimary("Connect", null);
+                primaryEnabled = false;
                 break;
             default:
                 setPrimary("Scan for motorcycle", v -> ensurePermissionsThen(this::doScan));
                 break;
         }
+        primaryBtn.setEnabled(primaryEnabled);
+        primaryBtn.setAlpha(primaryEnabled ? 1f : 0.5f);
 
         // Forget appears only once a motorcycle is remembered.
         forgetBtn.setVisibility(bridge.hasSavedDevice() ? View.VISIBLE : View.GONE);
 
-        // Steer focus to the Connection card while the link is coming up or live.
-        devCard.setAlpha(busy || u == UiState.CONNECTED ? 0.5f : 1f);
+        // Scan is only offered with nothing saved; dim the Devices card otherwise.
+        devCard.setAlpha(u == UiState.NONE || u == UiState.SAVED_UNBONDED ? 1f : 0.5f);
     }
 
     private void setPrimary(String text, View.OnClickListener click) {
