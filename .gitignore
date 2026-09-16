@@ -1,0 +1,27 @@
+# APKs are NEVER committed — fetch them with scripts/fetch-apk.sh
+*.apk
+*.xapk
+*.apkm
+
+# Signing material — throwaway, generated locally
+*.keystore
+*.jks
+*.idsig
+
+# Build artifacts / decompile output
+/apk/
+/build/
+*.dex
+*.class
+
+# Python caches
+__pycache__/
+*.pyc
+.mypy_cache/
+
+# Local config
+.env
+
+# OS/editor noise
+.DS_Store
+*.swp

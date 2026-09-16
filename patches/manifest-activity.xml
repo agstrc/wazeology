@@ -1,0 +1,6 @@
+        <activity android:exported="true" android:icon="@mipmap/launch_icon_round" android:label="Wazeology" android:launchMode="singleTask" android:taskAffinity="com.waze.wazeology" android:name="com.waze.wazeology.WazeologyActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>

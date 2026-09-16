@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Wazeology launcher icon (adaptive). Self-contained on purpose: background + foreground are
+  INLINE vectors so this file references ONLY framework (android:*) attributes and NO app resource
+  ids. That is what lets build.sh compile it standalone with aapt2 and graft.py drop the compiled
+  bytes over an existing resource file WITHOUT touching resources.arsc (the golden rule).
+
+  The mark is centred at (54,54) and scaled to ~58dp wide via the <group> transform, so it sits with
+  clear margins under any launcher mask (a touch larger than Waze's ~43dp mascot footprint).
+
+  It overwrites the bytes of the ORPHAN resource mipmap/launch_icon_round (Waze's manifest sets
+  only android:icon=@mipmap/launch_icon, never android:roundIcon, so launch_icon_round is unused by
+  Waze). The Wazeology <activity> then points android:icon at @mipmap/launch_icon_round. Waze's own
+  launch_icon (and the shared launch_icon_foreground) are left untouched.
+
+  Canvas is the standard 108x108 adaptive grid. The mark is the Rideology green slash + custom "R"
+  (the R recoloured white). Background is Waze blue #33ccff (= @color/brand_waze / Blue300).
+  Colours are #AARRGGBB (Android order).
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background>
+        <vector android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#ff33ccff" android:pathData="M0,0h108v108h-108z"/>
+        </vector>
+    </background>
+    <foreground>
+        <vector android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <group android:pivotX="194.0" android:pivotY="56.295" android:scaleX="0.149485" android:scaleY="0.149485" android:translateX="-140.0000" android:translateY="-2.2950">
+                <path android:fillColor="#ff69be28" android:pathData="M78.02,0l-78.02,112.59l107.6,0l78.28,-112.59l-107.86,0z"/>
+                <path android:fillColor="#ffffffff" android:pathData="M361.27,66.58h-58.19l41.9,46h-44.75l-41.83,-46h-102.47l18.59,-26.72h166.88l5.01,-7.02c0.43,-0.61 0.67,-1.31 0.67,-2.06 0,-2.25 -2.24,-4.08 -4.99,-4.08H183.61L202.26,0h151.47c16.59,0 24.77,1.92 29.71,8.52 4.51,6.02 7.08,14.98 -0.84,26.95l-21.33,31.11Z"/>
+            </group>
+        </vector>
+    </foreground>
+</adaptive-icon>
