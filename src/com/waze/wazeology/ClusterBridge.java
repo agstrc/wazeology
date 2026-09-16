@@ -8,6 +8,7 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
@@ -40,6 +41,7 @@ public final class ClusterBridge implements BleClient.Listener {
     private static final long SCAN_TIMEOUT_MS = 15000L;
     private static final String PREFS = "waze_motorcycle";
     private static final String KEY_MAC = "mac";
+    private static final String KEY_NAME = "name";
     private static final String NO_NAVIGATION = "No navigation";
 
     private static volatile ClusterBridge INSTANCE;
@@ -215,7 +217,7 @@ public final class ClusterBridge implements BleClient.Listener {
     }
 
     /** Human label for the device we intend to be linked to: the live target's name/address, else the
-     *  saved MAC. Null only when nothing is targeted and nothing is remembered. */
+     *  saved name, else the saved MAC. Null only when nothing is targeted and nothing is remembered. */
     public String currentTargetLabel() {
         BluetoothDevice dev = reconnectTarget;
         if (dev != null) {
@@ -229,7 +231,9 @@ public final class ClusterBridge implements BleClient.Listener {
             }
             return dev.getAddress();
         }
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MAC, null);
+        SharedPreferences p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        String name = p.getString(KEY_NAME, null);
+        return name != null ? name : p.getString(KEY_MAC, null);
     }
 
     // ---- scanning ------------------------------------------------------------------------------
@@ -350,7 +354,8 @@ public final class ClusterBridge implements BleClient.Listener {
     public void forget() {
         BluetoothDevice dev = reconnectTarget;
         disconnect();
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_MAC).apply();
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_MAC).remove(KEY_NAME).apply();
         if (dev != null) {
             try {
                 dev.getClass().getMethod("removeBond").invoke(dev);
@@ -599,8 +604,17 @@ public final class ClusterBridge implements BleClient.Listener {
             }
             stopReconnecting();
             if (reconnectTarget != null) {
-                context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                    .putString(KEY_MAC, reconnectTarget.getAddress()).apply();
+                SharedPreferences.Editor e = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(KEY_MAC, reconnectTarget.getAddress());
+                try {
+                    String name = reconnectTarget.getName();
+                    if (name != null) {
+                        e.putString(KEY_NAME, name);
+                    }
+                } catch (SecurityException ignored) {
+                    // needs BLUETOOTH_CONNECT; keep any previously saved name
+                }
+                e.apply();
             }
             Sent s = lastSent;
             if (s != null) {
