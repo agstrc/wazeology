@@ -69,6 +69,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     private TextView logView;
     private LinearLayout deviceList;
+    private TextView devicePlaceholder;
     private final StringBuilder logBuffer = new StringBuilder();
 
     private ScrollView logScroll;
@@ -207,7 +208,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         devCard.addView(title("Devices"));
         deviceList = new LinearLayout(this);
         deviceList.setOrientation(LinearLayout.VERTICAL);
-        deviceList.addView(body("(no devices yet — tap Scan)"));
+        showDevices(new ArrayList<BluetoothDevice>());
         devCard.addView(deviceList);
         col.addView(devCard);
 
@@ -408,10 +409,19 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     @Override
     public void onDevices(List<BluetoothDevice> devices) {
+        showDevices(devices);
+        render();
+    }
+
+    /** Rebuilds the Devices list. When empty, keeps a placeholder whose wording render() keeps in step
+     *  with the current state (scanning is only offered — and only mentioned — with nothing paired). */
+    private void showDevices(List<BluetoothDevice> devices) {
         deviceList.removeAllViews();
         if (devices.isEmpty()) {
-            deviceList.addView(body("(no devices yet — tap Scan)"));
+            devicePlaceholder = body("");
+            deviceList.addView(devicePlaceholder);
         } else {
+            devicePlaceholder = null;
             for (BluetoothDevice d : devices) {
                 String name;
                 try {
@@ -427,7 +437,6 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 deviceList.addView(row);
             }
         }
-        render();
     }
 
     // ---- state -> UI (single render path) ------------------------------------------------------
@@ -574,8 +583,13 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         // Forget appears only once a motorcycle is remembered.
         forgetBtn.setVisibility(bridge.hasSavedDevice() ? View.VISIBLE : View.GONE);
 
-        // Scan is only offered with nothing saved; dim the Devices card otherwise.
-        devCard.setAlpha(u == UiState.NONE || u == UiState.SAVED_UNBONDED ? 1f : 0.5f);
+        // Scan is only offered with nothing saved; dim the Devices card otherwise, and only point at the
+        // Scan button while it is actually on screen.
+        boolean scanOffered = u == UiState.NONE || u == UiState.SAVED_UNBONDED;
+        devCard.setAlpha(scanOffered ? 1f : 0.5f);
+        if (devicePlaceholder != null) {
+            devicePlaceholder.setText(scanOffered ? "(no devices yet — tap Scan)" : "(no devices yet)");
+        }
     }
 
     private void setPrimary(String text, View.OnClickListener click) {
