@@ -98,6 +98,8 @@ public final class ClusterBridge implements BleClient.Listener {
     // Scan state.
     private BluetoothLeScanner scanner;
     private ScanCallback scanCallback;
+    private boolean scanning;      // a low-latency scan is currently running
+    private boolean scanAttempted; // at least one scan has been started this process (drives the "none found" copy)
     private final Map<String, BluetoothDevice> found = new LinkedHashMap<>();
 
     // Link target: the bonded motorcycle we intend to be linked to. A passive (autoConnect) handle is
@@ -280,6 +282,8 @@ public final class ClusterBridge implements BleClient.Listener {
             log("no BLE scanner available");
             return;
         }
+        scanning = true;
+        scanAttempted = true;
         found.clear();
         pushDevices();
         ScanSettings settings = new ScanSettings.Builder()
@@ -309,8 +313,17 @@ public final class ClusterBridge implements BleClient.Listener {
             log("scanning for the motorcycle...");
             main.postDelayed(scanTimeout, SCAN_TIMEOUT_MS);
         } catch (SecurityException e) {
+            scanning = false;
             log("scan needs the Bluetooth/Location permissions granted");
         }
+    }
+
+    public boolean isScanning() {
+        return scanning;
+    }
+
+    public boolean scanAttempted() {
+        return scanAttempted;
     }
 
     // A stored Runnable so removeCallbacks matches; `this::stopScan` allocates a fresh object each call.
@@ -318,11 +331,13 @@ public final class ClusterBridge implements BleClient.Listener {
         @Override
         public void run() {
             stopScan();
+            pushDevices(); // re-render at scan end (shows the found list, or the empty "none found" state)
         }
     };
 
     public void stopScan() {
         main.removeCallbacks(scanTimeout);
+        scanning = false;
         if (scanner != null && scanCallback != null) {
             try {
                 scanner.stopScan(scanCallback);

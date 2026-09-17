@@ -1,8 +1,9 @@
 package com.waze.wazeology;
 
-import android.animation.Animator;
 import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -16,16 +17,19 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AccelerateDecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -53,15 +57,25 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     private Palette palette;
 
     // Connection card views, all re-rendered through render().
+    private TextView headerCaption;
     private View dotView;
     private TextView stateLabel;
     private TextView cueLabel;
     private View passkeyBanner;
-    private ProgressBar progressBar;
+    private View unsupportedBanner;
     private Button primaryBtn;
     private Button forgetBtn;
     private LinearLayout devCard;
-    private Animator dotPulse;
+
+    /** The dot carries all the motion signal (there is no progress bar). Passive wait and active connect
+     *  are the same breathe at different speeds; error is a slow blink. */
+    private enum DotMotion { STATIC, BREATHE_SLOW, BREATHE_FAST, BLINK }
+    private ObjectAnimator dotAnim;
+    private DotMotion dotMotion = DotMotion.STATIC;
+    private UiState lastRendered;
+
+    // Set from onRequestPermissionsResult; drives an on-screen recovery path instead of a silent Log line.
+    private boolean mPermissionDenied;
 
     // Latest code state fed by the ClusterBridge.Ui callbacks; render() is a pure function of these + bridge.
     private BleClient.State mState = BleClient.State.IDLE;
@@ -92,6 +106,13 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         root.setPadding(pad, dp(24), pad, 0);
 
         root.addView(headline("Wazeology"));
+        headerCaption = body("");
+        LinearLayout.LayoutParams captionLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        captionLp.topMargin = dp(2);
+        headerCaption.setLayoutParams(captionLp);
+        headerCaption.setVisibility(View.GONE);
+        root.addView(headerCaption);
         root.addView(buildTabBar());
 
         FrameLayout content = new FrameLayout(this);
@@ -149,7 +170,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         col.setOrientation(LinearLayout.VERTICAL);
         col.setClipChildren(false);
         col.setClipToPadding(false);
-        col.setPadding(0, dp(2), 0, dp(16));
+        col.setPadding(0, 0, 0, dp(16));
         scroll.addView(col);
 
         LinearLayout connCard = card();
@@ -159,8 +180,13 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         LinearLayout statusRow = new LinearLayout(this);
         statusRow.setOrientation(LinearLayout.HORIZONTAL);
         statusRow.setGravity(Gravity.CENTER_VERTICAL);
+        // The dot scales up while breathing and sits flush at the card's left content edge; let it draw
+        // past both the child bounds (clipChildren) and the card's padding band (clipToPadding).
+        statusRow.setClipChildren(false);
+        connCard.setClipChildren(false);
+        connCard.setClipToPadding(false);
         dotView = new View(this);
-        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(10), dp(10));
+        LinearLayout.LayoutParams dotLp = new LinearLayout.LayoutParams(dp(14), dp(14));
         dotLp.rightMargin = dp(8);
         dotView.setLayoutParams(dotLp);
         statusRow.addView(dotView);
@@ -183,17 +209,9 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         passkeyBanner = buildPasskeyBanner();
         connCard.addView(passkeyBanner);
 
-        // Progress strip (shown only in the transient / reconnecting states).
-        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(100);
-        progressBar.setProgressTintList(ColorStateList.valueOf(palette.primary));
-        progressBar.setProgressBackgroundTintList(ColorStateList.valueOf(palette.surfaceVariant));
-        progressBar.setIndeterminateTintList(ColorStateList.valueOf(palette.primary));
-        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        pbLp.topMargin = dp(12);
-        progressBar.setLayoutParams(pbLp);
-        connCard.addView(progressBar);
+        // Unsupported-cluster banner (shown only when the connected cluster can't render navigation).
+        unsupportedBanner = buildUnsupportedBanner();
+        connCard.addView(unsupportedBanner);
 
         // One contextual primary action (Scan / Connect / Disconnect) + a secondary Forget.
         primaryBtn = filledButton("Scan for motorcycle");
@@ -217,25 +235,61 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     }
 
     private View buildPasskeyBanner() {
-        LinearLayout banner = new LinearLayout(this);
-        banner.setOrientation(LinearLayout.VERTICAL);
+        return banner(palette.primaryContainer, palette.onPrimaryContainer, "🔑",
+            "Confirm pairing",
+            "Check the passkey on your cluster matches the phone's, then confirm on both.");
+    }
+
+    private View buildUnsupportedBanner() {
+        return banner(palette.errorContainer, palette.onErrorContainer, "⚠",
+            "This cluster can't show navigation",
+            "It's a different model or firmware than Wazeology supports.");
+    }
+
+    /** A rounded, filled attention banner: a leading glyph beside a bold title and a body line. */
+    private View banner(int bgColor, int fgColor, String glyph, String titleText, String bodyText) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(palette.primaryContainer);
+        bg.setColor(bgColor);
         bg.setCornerRadius(dp(12));
-        banner.setBackground(bg);
-        int p = dp(12);
-        banner.setPadding(p, p, p, p);
-        TextView t = new TextView(this);
-        t.setText("Enter the passkey shown on your cluster");
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setTextColor(palette.onPrimaryContainer);
-        banner.addView(t);
+        row.setBackground(bg);
+        int p = dp(16);
+        row.setPadding(p, p, p, p);
+
+        TextView icon = new TextView(this);
+        icon.setText(glyph);
+        icon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        icon.setTextColor(fgColor);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        iconLp.rightMargin = dp(12);
+        row.addView(icon, iconLp);
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(fgColor);
+        textCol.addView(title);
+        TextView body = new TextView(this);
+        body.setText(bodyText);
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        body.setTextColor(fgColor);
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bodyLp.topMargin = dp(2);
+        textCol.addView(body, bodyLp);
+        row.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        row.setContentDescription(titleText + ". " + bodyText);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(12);
-        banner.setLayoutParams(lp);
-        return banner;
+        row.setLayoutParams(lp);
+        return row;
     }
 
     private View buildLogTab() {
@@ -329,15 +383,23 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     @Override
     protected void onResume() {
         super.onResume();
+        // Clear a stale "permission needed" state if the rider granted it from system Settings and returned.
+        if (mPermissionDenied && !hasMissingPermissions()) {
+            mPermissionDenied = false;
+        }
         // Also covers a fresh install, where the bridge was built before BLUETOOTH_CONNECT was granted.
         ensurePermissionsThen(bridge::ensurePassive);
+        render();
     }
 
     @Override
     protected void onStop() {
         super.onStop();
         bridge.stopScan();
-        stopDotPulse(); // don't leave the animator running while detached; render() restarts it on onStart
+        // Don't leave the animator running while detached; reset so onResume's render() re-applies motion.
+        cancelDotAnim();
+        dotMotion = DotMotion.STATIC;
+        lastRendered = null;
         bridge.setUi(null); // keep the singleton + BLE link alive; just detach the UI
     }
 
@@ -355,6 +417,15 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         }
         perms.add("android.permission.ACCESS_FINE_LOCATION");
         return perms.toArray(new String[0]);
+    }
+
+    private boolean hasMissingPermissions() {
+        for (String p : neededPermissions()) {
+            if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void ensurePermissionsThen(Runnable onGranted) {
@@ -382,10 +453,12 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 allGranted = false;
             }
         }
+        mPermissionDenied = !allGranted;
         appendLog(allGranted ? "permissions granted" : "some permissions denied; scanning/connecting may fail");
         if (allGranted) {
             bridge.ensurePassive();
         }
+        render();
     }
 
     // ---- ClusterBridge.Ui (all on main thread) ----------------------------------------------------
@@ -429,12 +502,9 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 } catch (SecurityException e) {
                     name = null;
                 }
-                String label = (name == null ? "(unnamed)" : name) + "\n" + d.getAddress();
-                Button row = outlinedButton(label);
-                row.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
                 final BluetoothDevice device = d;
-                row.setOnClickListener(v -> bridge.connect(device));
-                deviceList.addView(row);
+                deviceList.addView(deviceRow(name == null ? "(unnamed)" : name, d.getAddress(),
+                    v -> bridge.connect(device)));
             }
         }
     }
@@ -457,7 +527,8 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 break;
         }
         // IDLE. Bluetooth off is checked first: the bonded set is empty then, so no target can resolve.
-        if (!bridge.isBluetoothOn() && bridge.hasSavedDevice()) {
+        // Reported whether or not a motorcycle is saved, so a fresh install with BT off isn't a dead end.
+        if (!bridge.isBluetoothOn()) {
             return UiState.OFFLINE;
         }
         // With a target this is either paused or the brief gap before a re-arm.
@@ -475,16 +546,16 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         Capabilities caps = bridge.capabilities();
         boolean unsupported = caps != null && !caps.navigationSupported;
         UiState u = deriveUiState();
-        boolean busy = u == UiState.CONNECTING || u == UiState.PAIRING || u == UiState.WAITING;
+        boolean scanning = bridge.isScanning();
+        boolean scanOffered = u == UiState.NONE || u == UiState.SAVED_UNBONDED;
+        boolean permBlocked = mPermissionDenied && scanOffered;
 
-        // Status dot: grey at rest, primary (pulsing) while busy, steady primary when connected, error modifier.
-        int dotColor = unsupported ? palette.error
-            : (busy || u == UiState.CONNECTED) ? palette.primary : palette.outline;
-        setDotColor(dotColor);
-        if (busy) {
-            startDotPulse();
+        // Header caption: the saved bike's name, so the header isn't a lone word.
+        if (bridge.hasSavedDevice()) {
+            headerCaption.setText(targetName());
+            headerCaption.setVisibility(View.VISIBLE);
         } else {
-            stopDotPulse();
+            headerCaption.setVisibility(View.GONE);
         }
 
         // State label — never the raw enum.
@@ -508,7 +579,8 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 label = "Saved: " + targetName() + " — disconnected";
                 break;
             case OFFLINE:
-                label = "Saved: " + targetName() + " — Bluetooth off";
+                label = bridge.hasSavedDevice()
+                    ? "Saved: " + targetName() + " — Bluetooth off" : "Bluetooth is off";
                 break;
             case SAVED_UNBONDED:
                 label = "Saved: " + targetName() + " — needs pairing";
@@ -518,15 +590,45 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                 label = "Not connected";
                 break;
         }
-        if (unsupported) {
-            label = label + " · navigation unsupported";
+        if (permBlocked) {
+            label = "Bluetooth permission needed"; // recovery offered on the primary button below
         }
+
+        // Error states get the error colour + a filled error dot; the unsupported suffix moved to a banner.
+        boolean errorState = unsupported || u == UiState.OFFLINE || permBlocked;
         stateLabel.setText(label);
-        stateLabel.setTextColor(unsupported ? palette.error
+        stateLabel.setTextColor(errorState ? palette.error
             : u == UiState.CONNECTED ? palette.primary : palette.onSurface);
 
-        // Cue line (independent of the state line).
-        if (!mCue.isEmpty()) {
+        // Status dot: shape + colour carry the state (ring = no link, filled = a link exists/is pursued),
+        // while the breathe rate is the only difference between passive wait and an active connect.
+        int dotColor;
+        boolean filled;
+        DotMotion motion;
+        if (scanning) {
+            dotColor = palette.primary; filled = false; motion = DotMotion.BREATHE_FAST; // searching, no link yet
+        } else if (errorState) {
+            dotColor = palette.error; filled = false; motion = DotMotion.BLINK;
+        } else if (u == UiState.CONNECTED) {
+            dotColor = palette.primary; filled = true; motion = DotMotion.STATIC;
+        } else if (u == UiState.WAITING) {
+            dotColor = palette.primary; filled = true; motion = DotMotion.BREATHE_SLOW; // passive wait
+        } else if (u == UiState.CONNECTING || u == UiState.PAIRING) {
+            dotColor = palette.primary; filled = true; motion = DotMotion.BREATHE_FAST; // active connect
+        } else {
+            dotColor = palette.onSurfaceVariant; filled = false; motion = DotMotion.STATIC; // NONE/PAUSED/SAVED
+        }
+        setDotStyle(dotColor, filled);
+        dotView.setContentDescription(label);
+        applyDotMotion(motion);
+        // A single settle bounce on the transition into CONNECTED (not on every render while connected).
+        if (u == UiState.CONNECTED && lastRendered != null && lastRendered != UiState.CONNECTED) {
+            playConnectSettle();
+        }
+        lastRendered = u;
+
+        // Cue line: only while connected and actually navigating (the idle default is "No navigation").
+        if (u == UiState.CONNECTED && !mCue.isEmpty() && !mCue.equalsIgnoreCase("No navigation")) {
             cueLabel.setText("Cue: " + mCue);
             cueLabel.setVisibility(View.VISIBLE);
         } else {
@@ -534,48 +636,35 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         }
 
         passkeyBanner.setVisibility(u == UiState.PAIRING ? View.VISIBLE : View.GONE);
-
-        // Progress strip: determinate step ladder while connecting, indeterminate while waiting,
-        // fill-to-100 then collapse when it goes READY, hidden at rest.
-        if (u == UiState.WAITING) {
-            progressBar.setIndeterminate(true);
-            progressBar.setVisibility(View.VISIBLE);
-        } else if (u == UiState.CONNECTING || u == UiState.PAIRING) {
-            progressBar.setIndeterminate(false);
-            progressBar.setVisibility(View.VISIBLE);
-            progressBar.setProgress(stepFor(mState));
-        } else if (u == UiState.CONNECTED) {
-            progressBar.setIndeterminate(false);
-            if (progressBar.getVisibility() == View.VISIBLE && progressBar.getProgress() < 100) {
-                animateProgressToFull();
-            }
-        } else {
-            progressBar.setIndeterminate(false);
-            progressBar.setVisibility(View.GONE);
-            progressBar.setProgress(0);
-        }
+        unsupportedBanner.setVisibility(unsupported ? View.VISIBLE : View.GONE);
 
         // Contextual primary action. No Stop/Cancel: a saved motorcycle is waited for until Forget.
         boolean primaryEnabled = true;
-        switch (u) {
-            case CONNECTED:
-                setPrimary("Disconnect", v -> bridge.disconnect());
-                break;
-            case WAITING:
-                setPrimary("Connect now", v -> ensurePermissionsThen(bridge::connectNow));
-                break;
-            case PAUSED:
-                setPrimary("Connect", v -> ensurePermissionsThen(bridge::connectNow));
-                break;
-            case OFFLINE:
-            case CONNECTING:
-            case PAIRING:
-                setPrimary("Connect", null);
-                primaryEnabled = false;
-                break;
-            default:
-                setPrimary("Scan for motorcycle", v -> ensurePermissionsThen(this::doScan));
-                break;
+        if (u == UiState.OFFLINE) {
+            setPrimary("Turn on Bluetooth", v -> openBluetooth());
+        } else if (permBlocked) {
+            setPrimary("Open app settings", v -> openAppSettings());
+        } else if (scanning) {
+            setPrimary("Scanning…", null);
+            primaryEnabled = false;
+        } else {
+            switch (u) {
+                case CONNECTED:
+                    setPrimary("Disconnect", v -> bridge.disconnect());
+                    break;
+                case WAITING:
+                case PAUSED:
+                    setPrimary("Connect now", v -> ensurePermissionsThen(bridge::connectNow));
+                    break;
+                case CONNECTING:
+                case PAIRING:
+                    setPrimary("Connect", null);
+                    primaryEnabled = false;
+                    break;
+                default:
+                    setPrimary("Scan for motorcycle", v -> ensurePermissionsThen(this::doScan));
+                    break;
+            }
         }
         primaryBtn.setEnabled(primaryEnabled);
         primaryBtn.setAlpha(primaryEnabled ? 1f : 0.5f);
@@ -583,12 +672,39 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         // Forget appears only once a motorcycle is remembered.
         forgetBtn.setVisibility(bridge.hasSavedDevice() ? View.VISIBLE : View.GONE);
 
-        // Scan is only offered with nothing saved; dim the Devices card otherwise, and only point at the
-        // Scan button while it is actually on screen.
-        boolean scanOffered = u == UiState.NONE || u == UiState.SAVED_UNBONDED;
-        devCard.setAlpha(scanOffered ? 1f : 0.5f);
+        // The Devices list only matters while scanning is offered; hide it once a motorcycle is remembered.
+        devCard.setVisibility(scanOffered ? View.VISIBLE : View.GONE);
         if (devicePlaceholder != null) {
-            devicePlaceholder.setText(scanOffered ? "(no devices yet — tap Scan)" : "(no devices yet)");
+            String placeholder;
+            if (scanning) {
+                placeholder = "Searching for your motorcycle…";
+            } else if (bridge.scanAttempted()) {
+                placeholder = "No motorcycle found. Make sure the cluster is powered on, then scan again.";
+            } else {
+                placeholder = "(no devices yet — tap Scan)";
+            }
+            devicePlaceholder.setText(placeholder);
+        }
+    }
+
+    private void openBluetooth() {
+        try {
+            startActivity(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE));
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
+            } catch (Exception ignored) {
+                appendLog("could not open Bluetooth settings");
+            }
+        }
+    }
+
+    private void openAppSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName())));
+        } catch (Exception e) {
+            appendLog("could not open app settings");
         }
     }
 
@@ -602,57 +718,92 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         return n == null ? "motorcycle" : n;
     }
 
-    private static int stepFor(BleClient.State s) {
-        switch (s) {
-            case CONNECTING:
-                return 20;
-            case BONDING:
-                return 45;
-            case SUBSCRIBING:
-                return 70;
-            case INITIALIZING:
-                return 90;
-            default:
-                return 10;
-        }
-    }
-
-    private void animateProgressToFull() {
-        ObjectAnimator a = ObjectAnimator.ofInt(progressBar, "progress", progressBar.getProgress(), 100);
-        a.setDuration(400);
-        a.start();
-        progressBar.postDelayed(() -> {
-            if (deriveUiState() == UiState.CONNECTED) {
-                progressBar.setVisibility(View.GONE);
-            }
-        }, 800);
-    }
-
-    private void setDotColor(int color) {
+    /** Draws the status dot: a hollow ring (at rest) or a filled disc, so state reads without relying on
+     *  colour alone — legible in sunlight and to colour-blind riders. */
+    private void setDotStyle(int color, boolean filled) {
         GradientDrawable g = new GradientDrawable();
         g.setShape(GradientDrawable.OVAL);
-        g.setColor(color);
+        if (filled) {
+            g.setColor(color);
+        } else {
+            g.setColor(Color.TRANSPARENT);
+            g.setStroke(dp(2), color);
+        }
         dotView.setBackground(g);
     }
 
-    private void startDotPulse() {
-        if (dotPulse != null) {
+    /** Idempotent: sets the dot's ongoing motion, restarting the animator only when the mode actually
+     *  changes. Passive→active (and back) is a seamless speed change — the same breathe, its phase
+     *  carried over — so tapping Connect never pops. */
+    private void applyDotMotion(DotMotion m) {
+        if (m == dotMotion) {
             return;
         }
-        ObjectAnimator a = ObjectAnimator.ofFloat(dotView, "alpha", 1f, 0.3f);
-        a.setDuration(700);
-        a.setRepeatCount(ObjectAnimator.INFINITE);
-        a.setRepeatMode(ObjectAnimator.REVERSE);
-        a.start();
-        dotPulse = a;
+        boolean seamless = dotAnim != null && isBreathe(dotMotion) && isBreathe(m);
+        float phase = seamless ? dotAnim.getAnimatedFraction() : 0f;
+        dotMotion = m;
+        cancelDotAnim();
+        switch (m) {
+            case BREATHE_SLOW:
+                startBreathe(1300, phase);
+                break;
+            case BREATHE_FAST:
+                startBreathe(650, phase);
+                break;
+            case BLINK:
+                startBlink();
+                break;
+            case STATIC:
+            default:
+                break; // cancelDotAnim already reset the transforms
+        }
     }
 
-    private void stopDotPulse() {
-        if (dotPulse != null) {
-            dotPulse.cancel();
-            dotPulse = null;
+    private static boolean isBreathe(DotMotion m) {
+        return m == DotMotion.BREATHE_SLOW || m == DotMotion.BREATHE_FAST;
+    }
+
+    private void startBreathe(int periodMs, float phase) {
+        ObjectAnimator a = ObjectAnimator.ofPropertyValuesHolder(dotView,
+            PropertyValuesHolder.ofFloat("scaleX", 1f, 1.18f),
+            PropertyValuesHolder.ofFloat("scaleY", 1f, 1.18f));
+        a.setDuration(periodMs);
+        a.setRepeatCount(ObjectAnimator.INFINITE);
+        a.setRepeatMode(ObjectAnimator.REVERSE);
+        a.setInterpolator(new AccelerateDecelerateInterpolator());
+        a.start();
+        a.setCurrentFraction(phase); // continuous scale value across a speed change
+        dotAnim = a;
+    }
+
+    private void startBlink() {
+        ObjectAnimator a = ObjectAnimator.ofFloat(dotView, "alpha", 1f, 0.6f);
+        a.setDuration(1400);
+        a.setRepeatCount(ObjectAnimator.INFINITE);
+        a.setRepeatMode(ObjectAnimator.REVERSE);
+        a.setInterpolator(new LinearInterpolator());
+        a.start();
+        dotAnim = a;
+    }
+
+    private void cancelDotAnim() {
+        if (dotAnim != null) {
+            dotAnim.cancel();
+            dotAnim = null;
         }
+        dotView.setScaleX(1f);
+        dotView.setScaleY(1f);
         dotView.setAlpha(1f);
+    }
+
+    /** A single "lock" bounce the moment the link goes ready, then dead still. */
+    private void playConnectSettle() {
+        ObjectAnimator a = ObjectAnimator.ofPropertyValuesHolder(dotView,
+            PropertyValuesHolder.ofFloat("scaleX", 1f, 1.28f, 1f),
+            PropertyValuesHolder.ofFloat("scaleY", 1f, 1.28f, 1f));
+        a.setDuration(280);
+        a.setInterpolator(new AccelerateDecelerateInterpolator());
+        a.start();
     }
 
     private void appendLog(String line) {
@@ -680,6 +831,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setTextColor(palette.onSurface);
+        markHeading(t);
         return t;
     }
 
@@ -690,7 +842,14 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setTextColor(palette.onSurface);
         t.setPadding(0, 0, 0, dp(8));
+        markHeading(t);
         return t;
+    }
+
+    private void markHeading(View v) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            v.setAccessibilityHeading(true);
+        }
     }
 
     private TextView body(String text) {
@@ -740,6 +899,51 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         return b;
     }
 
+    /** A tappable device list row: bold name over a dim MAC, with a trailing chevron, so the list reads
+     *  as a picker rather than a stack of generic pill buttons. */
+    private View deviceRow(String name, String address, View.OnClickListener onClick) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(56));
+        int p = dp(12);
+        row.setPadding(p, p, p, p);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(palette.surface);
+        bg.setCornerRadius(dp(12));
+        row.setBackground(rippled(withAlpha(palette.primary, 0x33), bg));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setContentDescription("Connect to " + name);
+        row.setOnClickListener(onClick);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(8);
+        row.setLayoutParams(lp);
+
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        TextView nameView = new TextView(this);
+        nameView.setText(name);
+        nameView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        nameView.setTypeface(Typeface.DEFAULT_BOLD);
+        nameView.setTextColor(palette.onSurface);
+        textCol.addView(nameView);
+        TextView addrView = new TextView(this);
+        addrView.setText(address);
+        addrView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        addrView.setTextColor(palette.onSurfaceVariant);
+        textCol.addView(addrView);
+        row.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView chevron = new TextView(this);
+        chevron.setText("›"); // ›
+        chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        chevron.setTextColor(palette.onSurfaceVariant);
+        row.addView(chevron);
+        return row;
+    }
+
     private Button baseButton(String text) {
         Button b = new Button(this);
         b.setText(text);
@@ -760,23 +964,21 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         t.setTypeface(Typeface.DEFAULT_BOLD);
         t.setGravity(Gravity.CENTER);
-        t.setPadding(0, dp(10), 0, dp(10));
+        t.setPadding(0, dp(12), 0, dp(12));
+        t.setMinHeight(dp(48));
         t.setClickable(true);
         t.setFocusable(true);
         return t;
     }
 
     private void styleTab(TextView t, boolean selected) {
-        if (selected) {
-            GradientDrawable bg = new GradientDrawable();
-            bg.setColor(palette.primaryContainer);
-            bg.setCornerRadius(dp(18));
-            t.setBackground(bg);
-            t.setTextColor(palette.onPrimaryContainer);
-        } else {
-            t.setBackground(null);
-            t.setTextColor(palette.onSurfaceVariant);
-        }
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(selected ? palette.primaryContainer : Color.TRANSPARENT);
+        bg.setCornerRadius(dp(18));
+        t.setBackground(rippled(withAlpha(palette.primary, 0x33), bg));
+        t.setTextColor(selected ? palette.onPrimaryContainer : palette.onSurfaceVariant);
+        t.setSelected(selected);
+        t.setContentDescription(t.getText() + (selected ? ", selected" : ""));
     }
 
     private Drawable rippled(int rippleColor, Drawable content) {

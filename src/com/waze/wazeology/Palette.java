@@ -23,6 +23,8 @@ final class Palette {
     final int onSurfaceVariant;
     final int outline;
     final int error;
+    final int errorContainer;
+    final int onErrorContainer;
 
     Palette(Context context) {
         int mode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
@@ -38,6 +40,8 @@ final class Palette {
             onSurfaceVariant   = Color.parseColor("#C4C8BA");
             outline            = Color.parseColor("#8E9285");
             error              = Color.parseColor("#F2B8B5");
+            errorContainer     = Color.parseColor("#8C1D18");
+            onErrorContainer   = Color.parseColor("#F2B8B5");
         } else {
             primary            = Color.parseColor("#3A6A1E");
             onPrimary          = Color.parseColor("#FFFFFF");
@@ -49,6 +53,8 @@ final class Palette {
             onSurfaceVariant   = Color.parseColor("#44483E");
             outline            = Color.parseColor("#74796D");
             error              = Color.parseColor("#B3261E");
+            errorContainer     = Color.parseColor("#F9DEDC");
+            onErrorContainer   = Color.parseColor("#410E0B");
         }
     }
 }
