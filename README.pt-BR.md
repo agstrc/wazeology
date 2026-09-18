@@ -10,19 +10,12 @@ Kawasaki compatível com o Rideology.
 O patch injeta um pequeno pacote (`com.waze.wazeology`) que lê as orientações de navegação em tempo real de
 dentro do próprio Waze e envia frames de navegação Kawasaki `0x14` para o painel. Ele também adiciona uma tela
 de gerenciamento, a **"Wazeology"**, um segundo ícone de app, onde você busca, pareia, conecta e lê o log. A
-build não toca nos recursos do próprio Waze e troca só o código modificado, então o app se comporta exatamente
-como antes, fora a ligação extra com o painel.
+build muda só o código e mantém todas as telas do Waze intactas, então o app se comporta exatamente como
+antes, fora a ligação extra com o painel.
 
 ![A próxima curva do Waze espelhada em um painel TFT da Kawasaki: uma conversão à direita em 30 m mostrada no painel, ao lado da mesma indicação no celular](docs/example-cluster.jpg)
 
 *A próxima curva aparece no painel, então dá para dispensar o suporte de celular: você pilota guiando só pelo painel, ou pareia um intercomunicador para ouvir as instruções por voz também, com o celular travado no bolso.*
-
-> **Antes de instalar:** este não é um app de baixar e usar com um toque. Ninguém pode te passar uma cópia
-> pronta, porque o app do Waze não pode ser redistribuído legalmente. Você baixa a sua própria cópia do Waze e
-> aplica o patch em um computador, e depois envia o resultado para o celular com o `adb`, a ferramenta de
-> instalação do Android voltada a desenvolvedores, por cabo USB ou pela rede. Tudo roda na linha de comando,
-> então, se `adb`, Docker e terminais forem novidade para você, conte com algum aprendizado pela frente ou peça
-> ajuda a quem já conhece essas ferramentas.
 
 ## Sumário
 
@@ -58,10 +51,10 @@ para a unidade exata testada e as ressalvas de mercado e ano-modelo.
 
 ### Veja também
 
-- [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) cobre todo o mecanismo de decompilação, patch e enxerto
-  (graft), além da referência do protocolo BLE5 da Kawasaki.
-- [`CLAUDE.md`](CLAUDE.md) reúne as regras de trabalho deste repositório, incluindo a regra de ouro de "nunca
-  reconstruir os recursos".
+- [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) cobre todo o mecanismo de decompilação, patch, enxerto
+  (graft) e empacotamento, além da referência do protocolo BLE5 da Kawasaki.
+- [`CLAUDE.md`](CLAUDE.md) reúne as regras de trabalho deste repositório, incluindo a regra de ouro de nunca
+  deixar o apktool reconstruir os recursos.
 
 ## Instalação
 
@@ -95,7 +88,7 @@ Algumas observações sobre entradas e reprodutibilidade:
 Compile e instale de uma vez só (o fetch é idempotente):
 
 ```bash
-scripts/all.sh             # baixa -> decompila -> aplica patch -> compila -> instala
+scripts/all.sh             # baixa -> decompila -> aplica patch -> compila -> empacota -> instala
 ```
 
 Ou passo a passo:
@@ -105,16 +98,21 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # injeta 4 hooks smali + a <activity> do atalho
 scripts/framecheck.sh      # teste de layout dos bytes do frame, sem a moto
-scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta, assina
-scripts/install.sh         # adb install-multiple (base + splits)
+scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta
+scripts/merge.sh           # empacota base + splits em build/gen/wazeology.apk
+scripts/install.sh         # adb install build/gen/wazeology.apk
 ```
+
+O apk empacotado inclui todos os idiomas que o Waze traz. Para incluir só alguns, defina `LANGS`, por exemplo
+`LANGS="pt en" scripts/all.sh` (ou `scripts/merge.sh`). A ABI do aparelho e a densidade de tela entram sempre.
 
 Depois, no aparelho: abra o ícone **Wazeology** → **Scan** → toque na sua moto → aceite o pareamento no painel.
 (A tela Wazeology é em inglês.) Inicie uma rota no Waze e os frames de navegação passam a fluir para o painel.
 O **Log** dentro do app tem exportação por **Share** e **Copy**.
 
-O [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) explica como a build funciona por dentro: o enxerto do APK
-dividido em splits, os hooks smali, a regra de ouro de nunca reconstruir os recursos e o próprio protocolo BLE.
+O [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) explica como a build funciona por dentro: o enxerto (graft),
+os hooks smali, a regra de ouro de nunca deixar o apktool reconstruir os recursos, como os splits são
+empacotados em um único apk e o próprio protocolo BLE.
 
 ## Aviso legal
 

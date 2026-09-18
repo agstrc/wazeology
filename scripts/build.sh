@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Compile the Wazeology package, reassemble via apktool, graft onto pristine base.apk, align + sign.
-# Output: build/gen/base.apk + build/gen/splits/*.apk (all signed with the same debug key).
+# Compile the Wazeology package, reassemble via apktool, graft onto the pristine base.apk.
+# Output: build/gen/base.apk, the grafted intermediate base. scripts/merge.sh then bundles it with the
+# config splits and signs the final apk.
 set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 require_image
@@ -13,8 +14,6 @@ fi
 
 # 1. Gate on the frame byte-layout checks.
 "$SCRIPT_DIR/framecheck.sh"
-
-ensure_keystore
 
 # 2. Compile the Wazeology package (com.waze.wazeology + com.waze.debug) against android.jar -> a dex.
 log "compiling Wazeology package -> dex"
@@ -76,23 +75,4 @@ run_tools python3 scripts/graft.py \
     --res-sub "$ICON_TARGET=build/gen/icon/compiled.xml" \
     --out "build/gen/base.apk"
 
-# 5. Align + sign base and re-sign every split with the SAME key.
-log "zipalign + apksigner (base + splits)"
-run_tools bash -lc '
-set -e
-BT=/opt/android-sdk/build-tools/34.0.0
-"$BT/zipalign" -p -f 4 build/gen/base.apk build/gen/base-aligned.apk
-mv build/gen/base-aligned.apk build/gen/base.apk
-"$BT/apksigner" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android build/gen/base.apk
-rm -f build/gen/base.apk.idsig
-mkdir -p build/gen/splits
-for s in apk/split_*.apk; do
-  out="build/gen/splits/$(basename "$s")"
-  "$BT/zipalign" -p -f 4 "$s" "$out"
-  "$BT/apksigner" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android "$out"
-  rm -f "$out.idsig"
-done
-"$BT/apksigner" verify build/gen/base.apk && echo "base signature OK"
-'
-
-log "built: build/gen/base.apk + build/gen/splits/ — next: scripts/install.sh"
+log "grafted: build/gen/base.apk (intermediate). Next: scripts/merge.sh"

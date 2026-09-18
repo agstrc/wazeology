@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared config + Docker helpers for every script in this repo.
-# Golden rule: NO tool ever runs on the host. Everything goes through run_tools() (the toolchain image).
+# Host rule: NO tool ever runs on the host. Everything goes through run_tools() (the toolchain image).
 set -euo pipefail
 
 # --- repo paths -----------------------------------------------------------------------------
@@ -16,6 +16,7 @@ WAZE_PACKAGE="com.waze"
 WAZE_VERSION="${WAZE_VERSION:-5.23.0.2}"      # pinned default; overridable via .env
 WAZE_VERSION_CODE="1030725"
 APK_SOURCE="${APK_SOURCE:-apk-pure}"          # apk-pure (default) | google-play
+LANGS="${LANGS:-all}"                         # languages to bundle: "all" (default) or e.g. "pt en"
 IMAGE="waze-tools:latest"
 
 # Toolchain versions are pinned in docker/Dockerfile (apktool 2.10.0, build-tools 34.0.0,

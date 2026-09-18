@@ -13,7 +13,8 @@ USB-connected Android device. Nothing else, not apktool, the Android SDK, apkeep
 the host. Every script sources `scripts/lib.sh` and invokes its tools through `run_tools` or `run_tools_net`.
 
 Pinned versions, kept in sync between `scripts/lib.sh` and `docker/Dockerfile`: Waze 5.23.0.2 (versionCode
-1030725), apktool 2.10.0, Android build-tools 34.0.0, platform android-34, apkeep 1.0.0, and JDK 17.
+1030725), apktool 2.10.0, Android build-tools 34.0.0, platform android-34, apkeep 1.0.0, APKEditor 1.4.9
+(the split bundling in §11), and JDK 17.
 
 ## Build & install pipeline
 
@@ -23,12 +24,13 @@ scripts/fetch-apk.sh     # download the pinned Waze (apkeep -> apk/, gitignored)
 scripts/decompile.sh     # apktool d -> build/base_apktool
 scripts/patch.sh         # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh    # off-bike frame byte-layout test (build.sh also runs this as a gate)
-scripts/build.sh         # compile the Wazeology package -> dex, graft onto pristine base, align, sign
-scripts/install.sh       # adb install-multiple (base + splits)
+scripts/build.sh         # compile the Wazeology package -> dex, graft onto the pristine base
+scripts/merge.sh         # bundle the base + splits into one apk (build/gen/wazeology.apk), §11
+scripts/install.sh       # adb install build/gen/wazeology.apk
 ```
 
-`scripts/all.sh` chains the last five (`fetch` through `install`). The deep per-step detail, and *why* each
-step is shaped the way it is, is documented section by section below.
+`scripts/all.sh` chains `fetch` through `install`. Each step is documented in detail, with its rationale, in
+the sections below.
 
 After editing Java in `src/`, keep it Java 8-compatible and Android-framework-only (no Kotlin, no AppCompat,
 no new resources). Validate frame-builder changes with `scripts/framecheck.sh` (a host-JVM byte-layout test).
@@ -39,21 +41,20 @@ no new resources). Validate frame-builder changes with `scripts/framecheck.sh` (
 
 ---
 
-## 0. The mental model: Waze is a split APK
+## 0. The mental model: Waze ships as a split bundle, we ship one apk
 
 Modern Play apps ship as an **App Bundle**, delivered to the device as several APKs that share one identity:
 
-- `base.apk` — the code (`classes*.dex`), `AndroidManifest.xml`, `resources.arsc`, and default resources.
-- `split_config.arm64_v8a.apk` — native libraries for the device ABI.
-- `split_config.xxhdpi.apk` — density-specific resources.
-- `split_config.pt.apk` — a language config split (third-party library strings; Waze's own strings are in base).
+- `base.apk`: the code (`classes*.dex`), `AndroidManifest.xml`, `resources.arsc`, and default resources.
+- `split_config.arm64_v8a.apk`: native libraries for the device ABI.
+- `split_config.xxxhdpi.apk`: density-specific resources.
+- `split_config.pt.apk`: a language config split (third-party library strings; Waze's own strings are in base).
 
-Consequences that drive this whole project:
-
-1. You must install **all** the splits together with `adb install-multiple`, and **all of them must be signed
-   with the same key**. Install one alone → `INSTALL_FAILED_MISSING_SPLIT`.
-2. The base declares `android:required...SplitTypes`, so a base-only install is rejected at runtime.
-3. We only need to modify **code + manifest**, which live in `base.apk`. The splits are re-signed unchanged.
+apkeep hands us the base and all these config splits (§1). They are the input to this build and its
+intermediate stage. We patch only **code + manifest**, which live in `base.apk`, and leave the splits' own
+contents alone. The last step (§11) bundles the patched base and the splits into one standalone apk,
+`build/gen/wazeology.apk`. That bundled apk is the repository's only artifact, and it installs with a plain
+`adb install`.
 
 ---
 
@@ -111,10 +112,11 @@ Caused by: org.xmlpull.v1.XmlPullParserException: Binary XML file line #4:
 AndroidX drawable — a selector `<item>` lost its `drawable` attribute. It's a silent semantic corruption,
 not a build error, and it only surfaces on a screen that inflates that drawable (the route card's Switch).
 
-**Fix / architecture:** never rebuild resources. Start from the **pristine `base.apk`** and swap in only
-patched **code + manifest**; keep `resources.arsc` and every `res/*` **byte-identical**. That is the
-"graft" in §7, and `scripts/graft.py` asserts the `resources.arsc` SHA is unchanged. This single decision
-shapes the whole build.
+**Fix / architecture:** never let aapt2 recompile the resource XML. Start from the **pristine `base.apk`**
+and swap in only patched **code + manifest**, keeping every `res/*` file **byte-identical**. That is the
+"graft" in §7, and `scripts/graft.py` asserts the grafted base's `resources.arsc` SHA is unchanged. The
+bundling step (§11) then merges the split resource tables at the binary level. `resources.arsc` changes, but
+no resource XML is recompiled, so the rule still holds in the shipped apk.
 
 ---
 
@@ -246,24 +248,25 @@ compression, and:
 
 ---
 
-## 8. Align, sign, install — `scripts/build.sh` + `scripts/install.sh`
+## 8. Sign and install the bundled apk (`scripts/merge.sh` + `scripts/install.sh`)
+
+The graft (§7) leaves an unsigned intermediate `build/gen/base.apk`. `merge.sh` (§11) bundles it with the
+splits, aligns, and signs the result:
 
 ```
 zipalign -p -f 4 …                       # 4-byte align; -p page-aligns stored .so
-apksigner sign --ks build/debug.keystore … base.apk        # v2/v3
-# every split re-signed with the SAME key:
-apksigner sign --ks build/debug.keystore … split_config.*.apk
-adb install-multiple -r base.apk split_config.*.apk
+apksigner sign --ks build/debug.keystore … build/gen/wazeology.apk        # v2/v3
+adb install -r build/gen/wazeology.apk
 ```
 
 - The debug keystore is generated once (`ensure_keystore` in `lib.sh`) and reused, so its signature is stable
-  on a machine → **reinstall needs no uninstall**. Base and all splits **must** share this key.
-- Installing over a Waze that's signed with Google's key fails with a signature mismatch → **uninstall the
-  Play Waze first** (`adb uninstall com.waze`); you lose its login/data, which is expected for a debug build.
+  on a machine, and a reinstall needs no uninstall.
+- Installing over a Waze signed with Google's key fails with a signature mismatch, so uninstall the Play Waze
+  first (`adb uninstall com.waze`). You lose its login and data, which is expected for a debug build.
 - adb runs **in the container** (`run_tools_net`: `--privileged -v /dev/bus/usb …`). If `adb devices` is
-  empty inside the container, the **host adb server is holding the device** — run `adb kill-server` on the
-  host (or, conversely, rely on the host server and drop the USB mount). This is the one spot where host and
-  container adb can fight over the USB device.
+  empty inside the container, the host adb server is holding the device, so run `adb kill-server` on the host
+  (or rely on the host server and drop the USB mount). This is the one spot where host and container adb can
+  fight over the USB device.
 
 ---
 
@@ -286,11 +289,45 @@ adb install-multiple -r base.apk split_config.*.apk
 |---|---|
 | Route card / some screens crash with `InflateException` | apktool rebuilt resources. Use the graft (§3/§7); never ship rebuilt resources. |
 | `javac … Unable to find method metafactory` | `android.jar` on `-bootclasspath`. Put it on `-classpath` (§6). |
-| `INSTALL_FAILED_MISSING_SPLIT` | installed base alone. Use `install-multiple` with all splits (§8). |
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / signature mismatch | a differently-signed Waze is installed. `adb uninstall com.waze` first (§8). |
 | `adb devices` empty inside container | host adb server owns the USB device; `adb kill-server` on host (§8). |
 | Motorcycle never appears in Scan | it may not advertise the service UUID; the scan surfaces all named devices too — pick by name/MAC. Confirm Bluetooth + location permissions were granted. |
 | Distance shows stale/zero | ensure the distance hook is before the final `return-void`, not at method entry (§4). |
+
+---
+
+## 11. Bundle the base and splits into one apk (`scripts/merge.sh`)
+
+The graft (§7) produces the patched base. The last step bundles it with the config splits into one standalone
+apk, `build/gen/wazeology.apk`. That apk carries the base code and manifest, the arm64 native libs, and the
+density and language resources under one `resources.arsc`, and it installs with a plain `adb install`.
+
+Bundling means merging the split resource tables into one, which sounds like what the golden rule (§3)
+forbids. It is not: the rule's constraint is that aapt2 must not recompile the resource XML, because that is
+what corrupts the route-card drawable. Changing `resources.arsc` is fine.
+
+`merge.sh` runs **APKEditor** (`apkeditor m`, ARSCLib), which merges the base and split resource tables at the
+binary level and copies every `res/*` entry verbatim. It never invokes aapt2 on resource XML, so the
+corruption cannot happen: the `abc_switch_thumb_material.xml` binary is byte-identical before and after.
+APKEditor also sanitizes the manifest (it drops `requiredSplitTypes`, `isSplitRequired`, the
+`com.android.vending.splits` metadata, and `res/xml/splits0.xml`) and sets `extractNativeLibs=false`, so the
+OS accepts the result as a standalone apk.
+
+`LANGS` selects which language splits to bundle. The default, `all`, bundles every language apkeep fetched.
+Set it to a space-separated list to bundle fewer, for example `LANGS="pt en" scripts/merge.sh`. The ABI and
+density splits are always bundled. A Play install on a device carries only that device's languages, so a
+subset is closer to a Play install, though the size difference is small: the language splits are tiny next to
+the base and the native libs.
+
+`merge.sh` ends with a proof gate (`scripts/verify_merge.py`). It diffs the final apk's `res/*` against the
+pristine `apk/base.apk` and fails unless the only changed entries are the ones the graft intentionally patched
+(the launcher icon, §5.1) and the only dropped entry is `res/xml/splits0.xml`. That check confirms the merge
+rebuilt the resource table while leaving every resource file verbatim. It also asserts the native `.so` are
+STORED (uncompressed, required by `extractNativeLibs=false`) and that `classes6.dex` (hooks) and the Wazeology
+dex survived.
+
+The bundled apk is statically verified: structure, signature, and the resource gate above. It has not been
+re-validated end to end on the cluster, so do a bike pass (§9) before trusting it in the field.
 
 ## Reference
 

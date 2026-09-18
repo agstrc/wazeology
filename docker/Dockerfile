@@ -44,4 +44,16 @@ RUN wget -q https://github.com/EFForg/apkeep/releases/download/${APKEEP_VERSION}
         -O /usr/local/bin/apkeep \
     && chmod +x /usr/local/bin/apkeep
 
+# --- APKEditor (pinned jar): binary split-APK merger (ARSCLib) ---
+# Merges base + config splits into ONE standalone apk by merging the binary resource tables and
+# copying every res/* entry VERBATIM. It never re-encodes resource XML through aapt2, so it does
+# NOT trigger the drawable corruption the golden rule guards against (see DEVELOPMENT.md §11).
+ARG APKEDITOR_VERSION=1.4.9
+ARG APKEDITOR_SHA256=a9cd40df818845456be6d696de6110c89edf4b0a0580cb83438ed6b25a366e67
+RUN wget -q https://github.com/REAndroid/APKEditor/releases/download/V${APKEDITOR_VERSION}/APKEditor-${APKEDITOR_VERSION}.jar \
+        -O /opt/apkeditor.jar \
+    && echo "${APKEDITOR_SHA256}  /opt/apkeditor.jar" | sha256sum -c - \
+    && printf '#!/bin/sh\nexec java -jar /opt/apkeditor.jar "$@"\n' > /usr/local/bin/apkeditor \
+    && chmod +x /usr/local/bin/apkeditor
+
 WORKDIR /work

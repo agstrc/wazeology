@@ -8,20 +8,13 @@ Patch the Waze Android app to drive a Rideology-compatible Kawasaki BLE5 TFT ins
 
 The patch injects a small package (`com.waze.wazeology`) that reads Waze's live turn-by-turn guidance from
 inside the app and pushes Kawasaki `0x14` navigation frames to the cluster. It also adds a **"Wazeology"**
-management screen, a second launcher icon, where you scan, pair, connect, and read the log. The build leaves
-Waze's own resources completely untouched and swaps in only patched code, so the app behaves exactly as it did
-apart from the extra link to the cluster.
+management screen, a second launcher icon, where you scan, pair, connect, and read the log. The build changes
+only code and keeps every Waze screen intact, so the app behaves exactly as it did apart from the extra link
+to the cluster.
 
 ![Waze's next turn mirrored on a Kawasaki TFT cluster: a right turn in 30 m shown on the dash beside the same cue on the phone](docs/example-cluster.jpg)
 
 *The next turn shows on the cluster, so you can skip the phone mount: ride by the dash alone, or pair an intercom for spoken directions too, with the phone locked in your pocket.*
-
-> **Before you install:** this is not a one-tap, download-and-run app. No one is allowed to give
-> you a ready-made copy, because Waze's app cannot be legally redistributed. You download your own
-> copy of Waze and patch it on a computer, then send the patched result to your phone with `adb`,
-> Android's install tool for developers, over a USB cable or over your network. The steps run from
-> a command line, so if `adb`, Docker, and terminals are new to you, expect to do some learning or
-> get help from someone who knows them.
 
 ## Table of Contents
 
@@ -57,10 +50,10 @@ caveats.
 
 ### See Also
 
-- [`DEVELOPMENT.md`](DEVELOPMENT.md) covers the full decompile, patch, and graft mechanism, along with the
-  Kawasaki BLE5 protocol reference.
-- [`CLAUDE.md`](CLAUDE.md) holds the working rules for this repo, including the golden "never rebuild
-  resources" rule.
+- [`DEVELOPMENT.md`](DEVELOPMENT.md) covers the full decompile, patch, graft, and bundling mechanism, along
+  with the Kawasaki BLE5 protocol reference.
+- [`CLAUDE.md`](CLAUDE.md) holds the working rules for this repo, including the golden rule about never
+  letting apktool rebuild resources.
 
 ## Install
 
@@ -94,7 +87,7 @@ A few notes on inputs and reproducibility:
 Build and install in one shot (fetch is idempotent):
 
 ```bash
-scripts/all.sh             # fetch -> decompile -> patch -> build -> install
+scripts/all.sh             # fetch -> decompile -> patch -> build -> merge -> install
 ```
 
 Or step by step:
@@ -104,16 +97,21 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh      # off-bike frame byte-layout test
-scripts/build.sh           # compile Wazeology package -> dex, graft onto pristine base, sign
-scripts/install.sh         # adb install-multiple (base + splits)
+scripts/build.sh           # compile Wazeology package -> dex, graft onto the pristine base
+scripts/merge.sh           # bundle base + splits into build/gen/wazeology.apk
+scripts/install.sh         # adb install build/gen/wazeology.apk
 ```
+
+The bundled apk includes every language Waze ships. To include only some, set `LANGS`, for example
+`LANGS="pt en" scripts/all.sh` (or `scripts/merge.sh`). The device ABI and screen density are always included.
 
 Then, on the device: open the **Wazeology** icon → **Scan** → tap your motorcycle → accept the passkey on
 the cluster. Start a Waze route; turn-by-turn frames flow to the cluster. The in-app **Log** has **Share** /
 **Copy** export.
 
-[`DEVELOPMENT.md`](DEVELOPMENT.md) explains how the build works internally: the split-APK graft, the smali
-hooks, the golden rule about never rebuilding resources, and the BLE protocol itself.
+[`DEVELOPMENT.md`](DEVELOPMENT.md) explains how the build works internally: the graft, the smali hooks, the
+golden rule about not letting apktool rebuild resources, how the splits are bundled into one apk, and the BLE
+protocol itself.
 
 ## Disclaimer
 
