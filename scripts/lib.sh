@@ -22,7 +22,7 @@ IMAGE="waze-tools:latest"
 # Toolchain versions are pinned in docker/Dockerfile (apktool 2.10.0, build-tools 34.0.0,
 # platform android-34, apkeep 1.0.0). Keep them in sync with these constants for docs.
 
-# Optional .env (DEVICE_SERIAL, WAZE_VERSION, APK_SOURCE, GOOGLE_EMAIL, AAS_TOKEN, ...)
+# Optional .env (WAZE_VERSION, APK_SOURCE, LANGS, GOOGLE_EMAIL, AAS_TOKEN, ...)
 if [ -f "$REPO_ROOT/.env" ]; then
     # shellcheck disable=SC1091
     set -a; . "$REPO_ROOT/.env"; set +a
@@ -37,21 +37,6 @@ fi
 run_tools() {
     docker run --rm \
         -u "$(id -u):$(id -g)" \
-        -e HOME=/tmp \
-        -e JAVA_TOOL_OPTIONS=-Duser.home=/tmp \
-        -v "$REPO_ROOT:/work" -w /work \
-        "$IMAGE" "$@"
-}
-
-# adb-capable variant: passes the USB bus through so the container's own adb server can reach a
-# USB-connected device, and joins the host network (so it can alternatively talk to a host adb
-# server). If `adb devices` shows nothing, either the host adb server is holding the device
-# (run `adb kill-server` on the host) or you need a udev rule — see DEVELOPMENT.md.
-run_tools_net() {
-    docker run --rm \
-        --privileged \
-        --network host \
-        -v /dev/bus/usb:/dev/bus/usb \
         -e HOME=/tmp \
         -e JAVA_TOOL_OPTIONS=-Duser.home=/tmp \
         -v "$REPO_ROOT:/work" -w /work \

@@ -58,20 +58,21 @@ para a unidade exata testada e as ressalvas de mercado e ano-modelo.
 
 ## Instalação
 
-O wazeology é compilado e instalado inteiramente pelos scripts em `scripts/`. A única coisa que você instala na
-máquina é o Docker; toda a toolchain do Android roda dentro de uma imagem com versões fixadas.
+O wazeology é compilado inteiramente pelos scripts em `scripts/`, e a instalação no aparelho é manual. A única
+coisa que você instala na máquina é o Docker; toda a toolchain do Android roda dentro de uma imagem com
+versões fixadas.
 
 ```bash
-cp .env.example .env       # opcional: define DEVICE_SERIAL, fonte de download, etc.
+cp .env.example .env       # opcional: define a fonte de download, os idiomas, etc.
 scripts/build-image.sh     # uma vez: monta a imagem da toolchain fixada (~1,5 GB na primeira vez)
 scripts/fetch-apk.sh       # baixa o Waze 5.23.0.2 fixado (apkeep -> apk/, no gitignore)
 ```
 
 ### Dependências
 
-- O Docker é a única dependência da máquina. apktool, as build-tools do Android, apkeep, a JDK e o adb rodam
+- O Docker é a única dependência da máquina. apktool, as build-tools do Android, apkeep e a JDK rodam
   todos dentro da imagem da toolchain fixada que o `scripts/build-image.sh` monta.
-- Um aparelho Android acessível pelo `adb`, por USB ou pela rede, para a etapa de instalação.
+- Um aparelho Android para instalar o apk compilado, fazendo o sideload do `./wazeology.apk` nele.
 
 Algumas observações sobre entradas e reprodutibilidade:
 
@@ -85,10 +86,10 @@ Algumas observações sobre entradas e reprodutibilidade:
 
 ## Uso
 
-Compile e instale de uma vez só (o fetch é idempotente):
+Compile de uma vez só:
 
 ```bash
-scripts/all.sh             # baixa -> decompila -> aplica patch -> compila -> instala
+scripts/all.sh             # baixa -> decompila -> aplica patch -> compila
 ```
 
 Ou passo a passo:
@@ -98,12 +99,18 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # injeta 4 hooks smali + a <activity> do atalho
 scripts/framecheck.sh      # teste de layout dos bytes do frame, sem a moto
-scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta, empacota base + splits em build/gen/wazeology.apk
-scripts/install.sh         # adb install build/gen/wazeology.apk
+scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta, empacota base + splits em ./wazeology.apk
 ```
+
+O `fetch-apk.sh` e o `decompile.sh` pulam o trabalho quando suas saídas já estão no workspace, então recompilar
+é rápido. Rodar `FORCE=1 scripts/all.sh` baixa e decompila de novo do zero.
 
 O apk empacotado inclui todos os idiomas que o Waze traz. Para incluir só alguns, defina `LANGS`, por exemplo
 `LANGS="pt en" scripts/all.sh` (ou `scripts/build.sh`). A ABI do aparelho e a densidade de tela entram sempre.
+
+A build deixa o `./wazeology.apk` na raiz do repositório. Instale-o no aparelho por sideload: copie o arquivo
+e abra com o instalador de pacotes do aparelho, ou rode `adb install ./wazeology.apk` de uma máquina que tenha
+adb. (Instalar por cima do Waze da Play Store exige desinstalar essa cópia antes, porque as assinaturas diferem.)
 
 Depois, no aparelho: abra o ícone **Wazeology** → **Scan** → toque na sua moto → aceite o pareamento no painel.
 (A tela Wazeology é em inglês.) Inicie uma rota no Waze e os frames de navegação passam a fluir para o painel.

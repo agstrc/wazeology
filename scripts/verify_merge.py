@@ -8,7 +8,7 @@ the graft itself intentionally patched (the launcher icon), and the only dropped
 split descriptor. It also checks the native .so are STORED (extractNativeLibs=false) and the patched dex
 survived. Exit non-zero on any violation so scripts/build.sh fails loudly.
 
-Args: <pristine base.apk> <grafted build/gen/base.apk> <final build/gen/wazeology.apk>
+Args: <pristine base.apk> <grafted build/gen/base.apk> <final ./wazeology.apk>
 """
 import sys
 import zipfile

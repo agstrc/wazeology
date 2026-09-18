@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Compile the Wazeology package, reassemble via apktool, graft onto the pristine base.apk, then bundle
-# the grafted base with the config splits into one signed standalone apk: build/gen/wazeology.apk, the
-# repository's only build artifact. build/gen/base.apk is an internal intermediate.
+# the grafted base with the config splits into one signed standalone apk: ./wazeology.apk (repo root),
+# the repository's only build artifact. build/gen/base.apk is an internal intermediate.
 #
 # The bundle is a BINARY resource-table merge (APKEditor): it combines the base and split tables and
 # copies every res/* entry verbatim, with no aapt2 recompile. The golden rule (DEVELOPMENT.md §3) holds
@@ -101,7 +101,8 @@ want_split() {
 }
 
 # 5a. Assemble the merge input: the grafted base + the selected config splits.
-rm -rf build/gen/merge_in build/gen/merged.apk build/gen/wazeology.apk
+rm -rf build/gen/merge_in build/gen/merged.apk
+rm -f wazeology.apk wazeology.apk.idsig
 mkdir -p build/gen/merge_in
 cp build/gen/base.apk build/gen/merge_in/base.apk
 kept=0
@@ -115,15 +116,15 @@ log "merge input: base + $kept splits (LANGS=$LANGS)"
 log "apkeditor m (binary split merge -> single apk)"
 run_tools apkeditor m -i build/gen/merge_in -o build/gen/merged.apk
 
-# 5c. Align + sign the final apk.
-log "zipalign + apksigner (bundled apk)"
+# 5c. Align + sign the final apk, written to the repo root as ./wazeology.apk.
+log "zipalign + apksigner (bundled apk -> ./wazeology.apk)"
 run_tools bash -lc '
 set -e
 BT=/opt/android-sdk/build-tools/34.0.0
-"$BT/zipalign" -p -f 4 build/gen/merged.apk build/gen/wazeology.apk
-"$BT/apksigner" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android build/gen/wazeology.apk
-rm -f build/gen/wazeology.apk.idsig
-"$BT/apksigner" verify build/gen/wazeology.apk && echo "bundled-apk signature OK"
+"$BT/zipalign" -p -f 4 build/gen/merged.apk wazeology.apk
+"$BT/apksigner" sign --ks build/debug.keystore --ks-pass pass:android --key-pass pass:android wazeology.apk
+rm -f wazeology.apk.idsig
+"$BT/apksigner" verify wazeology.apk && echo "bundled-apk signature OK"
 '
 
 # 6. GATE: prove the merge corrupted nothing. Every pristine-base res/* file must be byte-identical in
@@ -132,7 +133,7 @@ rm -f build/gen/wazeology.apk.idsig
 #    (A script file, not an inline heredoc: run_tools has no `docker run -i`, so a `python3 - <<PY`
 #    would read empty stdin and silently no-op.)
 log "verifying resource integrity (golden rule preserved: no resource XML recompiled)"
-run_tools python3 scripts/verify_merge.py apk/base.apk build/gen/base.apk build/gen/wazeology.apk
+run_tools python3 scripts/verify_merge.py apk/base.apk build/gen/base.apk wazeology.apk
 
-log "built the bundled apk: build/gen/wazeology.apk"
-log "install it with: scripts/install.sh"
+log "built the bundled apk: ./wazeology.apk"
+log "install it by sideloading ./wazeology.apk onto the device (see DEVELOPMENT.md §8)"

@@ -1,7 +1,7 @@
 # Single toolchain image for the whole Waze -> Kawasaki patch pipeline.
-# Everything the scripts need runs inside this image; the host only needs Docker + a USB device.
+# Everything the scripts need runs inside this image; the host only needs Docker.
 #
-#   apktool  d8  zipalign  apksigner  aapt2  adb  apkeep  javac  python3  zip
+#   apktool  d8  zipalign  apksigner  aapt2  apkeep  javac  python3  zip
 #
 # All versions are pinned for reproducible builds.
 FROM eclipse-temurin:17-jdk-jammy
@@ -12,10 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget unzip zip python3 git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Android SDK (cmdline-tools -> build-tools + platform + platform-tools) ---
+# --- Android SDK (cmdline-tools -> build-tools + platform) ---
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV ANDROID_HOME=/opt/android-sdk
-ENV PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0
+ENV PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/build-tools/34.0.0
 
 ARG CMDLINE_TOOLS=commandlinetools-linux-11076708_latest.zip
 ARG ANDROID_PLATFORM=android-34
@@ -27,7 +27,6 @@ RUN mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools \
     && rm /tmp/cmdtools.zip \
     && yes | sdkmanager --licenses > /dev/null \
     && sdkmanager --install \
-        "platform-tools" \
         "platforms;${ANDROID_PLATFORM}" \
         "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null
 

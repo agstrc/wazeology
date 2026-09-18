@@ -8,29 +8,31 @@ extend the patch without stepping on the same landmines again. For user-facing i
 
 ## Requirements
 
-Everything runs inside the pinned toolchain container (`docker/Dockerfile`). The host only needs Docker and a
-USB-connected Android device. Nothing else, not apktool, the Android SDK, apkeep, or adb, gets installed on
-the host. Every script sources `scripts/lib.sh` and invokes its tools through `run_tools` or `run_tools_net`.
+Everything runs inside the pinned toolchain container (`docker/Dockerfile`). The host only needs Docker to
+build, plus an Android device to sideload the finished apk onto. Nothing else, not apktool, the Android SDK,
+or apkeep, gets installed on the host. Every script sources `scripts/lib.sh` and invokes its tools through
+`run_tools`.
 
 Pinned versions, kept in sync between `scripts/lib.sh` and `docker/Dockerfile`: Waze 5.23.0.2 (versionCode
 1030725), apktool 2.10.0, Android build-tools 34.0.0, platform android-34, apkeep 1.0.0, APKEditor 1.4.9
 (the split bundling in §11), and JDK 17.
 
-## Build & install pipeline
+## Build pipeline
 
 ```bash
 scripts/build-image.sh   # once: build the pinned toolchain image (~1.5 GB first time)
-scripts/fetch-apk.sh     # download the pinned Waze (apkeep -> apk/, gitignored)
-scripts/decompile.sh     # apktool d -> build/base_apktool
+scripts/fetch-apk.sh     # fetch the pinned Waze into apk/ (gitignored), skipping if already present
+scripts/decompile.sh     # apktool d into build/base_apktool, skipping if already present
 scripts/patch.sh         # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh    # off-bike frame byte-layout test (build.sh also runs this as a gate)
 scripts/build.sh         # compile the Wazeology package -> dex, graft onto the pristine base, then
-                         # bundle the base + splits into one signed apk (build/gen/wazeology.apk), §11
-scripts/install.sh       # adb install build/gen/wazeology.apk
+                         # bundle the base + splits into one signed apk (./wazeology.apk), §11
 ```
 
-`scripts/all.sh` chains `fetch` through `install`. Each step is documented in detail, with its rationale, in
-the sections below.
+`scripts/all.sh` chains `fetch` through `build` and leaves the finished `./wazeology.apk` at the repo root to
+sideload onto the device (§8). Each step is documented in detail, with its rationale, in the sections
+below. `fetch-apk.sh` and `decompile.sh` skip their work when their outputs are already in the workspace.
+Setting `FORCE=1` (e.g. `FORCE=1 scripts/all.sh`) re-downloads and re-decompiles from scratch.
 
 After editing Java in `src/`, keep it Java 8-compatible and Android-framework-only (no Kotlin, no AppCompat,
 no new resources). Validate frame-builder changes with `scripts/framecheck.sh` (a host-JVM byte-layout test).
@@ -53,8 +55,8 @@ Modern Play apps ship as an **App Bundle**, delivered to the device as several A
 apkeep hands us the base and all these config splits (§1). They are the input to this build and its
 intermediate stage. We patch only **code + manifest**, which live in `base.apk`, and leave the splits' own
 contents alone. The last step (§11) bundles the patched base and the splits into one standalone apk,
-`build/gen/wazeology.apk`. That bundled apk is the repository's only artifact, and it installs with a plain
-`adb install`.
+`./wazeology.apk` at the repo root. That bundled apk is the repository's only artifact, which you sideload
+onto the device (§8).
 
 ---
 
@@ -78,6 +80,9 @@ Either way the *inputs* are pinned to one version; the *outputs* differ only by 
 
 Verify identity: `aapt2 dump badging apk/base.apk` → `package: name='com.waze' versionName='5.23.0.2'`.
 
+The download is slow, so `fetch-apk.sh` skips it when `apk/base.apk` and the `apk/split_config.*.apk` are
+already in the workspace. Run `FORCE=1 scripts/fetch-apk.sh` to re-download.
+
 ---
 
 ## 2. Decompile — `scripts/decompile.sh`
@@ -85,6 +90,9 @@ Verify identity: `aapt2 dump badging apk/base.apk` → `package: name='com.waze'
 ```
 apktool d --force apk/base.apk -o build/base_apktool
 ```
+
+`decompile.sh` skips this when `build/base_apktool` already exists, so patches you have applied to the tree
+survive a re-run of the pipeline. Run `FORCE=1 scripts/decompile.sh` to discard it and decompile afresh.
 
 This baksmalis every `classes*.dex` into `smali/`, `smali_classes2/` … and decodes resources + the binary
 manifest into editable form. We edit **smali** (code) and **AndroidManifest.xml** here. We will **not** ship
@@ -248,37 +256,36 @@ compression, and:
 
 ---
 
-## 8. Sign and install the bundled apk (`scripts/build.sh` + `scripts/install.sh`)
+## 8. Sign and install the bundled apk (`scripts/build.sh`)
 
 The graft (§7) leaves an unsigned intermediate `build/gen/base.apk`. `build.sh` (§11) bundles it with the
-splits, aligns, and signs the result:
+splits, aligns, and signs the result into `./wazeology.apk` at the repo root:
 
 ```
 zipalign -p -f 4 …                       # 4-byte align; -p page-aligns stored .so
-apksigner sign --ks build/debug.keystore … build/gen/wazeology.apk        # v2/v3
-adb install -r build/gen/wazeology.apk
+apksigner sign --ks build/debug.keystore … wazeology.apk        # v2/v3
 ```
 
 - The debug keystore is generated once (`ensure_keystore` in `lib.sh`) and reused, so its signature is stable
   on a machine, and a reinstall needs no uninstall.
+- Installing is a manual step. Sideload `./wazeology.apk` onto the device: copy it over and open it with the
+  device's package installer, or run `adb install ./wazeology.apk` from any machine that has adb (the
+  toolchain image does not include adb).
 - Installing over a Waze signed with Google's key fails with a signature mismatch, so uninstall the Play Waze
-  first (`adb uninstall com.waze`). You lose its login and data, which is expected for a debug build.
-- adb runs **in the container** (`run_tools_net`: `--privileged -v /dev/bus/usb …`). If `adb devices` is
-  empty inside the container, the host adb server is holding the device, so run `adb kill-server` on the host
-  (or rely on the host server and drop the USB mount). This is the one spot where host and container adb can
-  fight over the USB device.
+  first (e.g. `adb uninstall com.waze`, or remove it from the device). You lose its login and data, which is
+  expected for a debug build.
 
 ---
 
 ## 9. Verify
 
-- **Off-bike:** `scripts/framecheck.sh` passes (frame byte layouts). After install, Waze cold-starts.
+- **Off-bike:** `scripts/framecheck.sh` passes (frame byte layouts). After you install `./wazeology.apk`, Waze cold-starts.
 - **Motorcycle path** (the sequence that passed on a Z900 SE): open **Wazeology → Scan** (surrounding BLE devices
   list) → tap the motorcycle → accept the passkey shown on the cluster → the log shows
   `CONNECTING → BONDING → SUBSCRIBING → INITIALIZING → READY`, then `meterIndication` every 5 s. Start a route →
   `0x14` frames render on the cluster; the in-app log shows each cue and its hex (and `(dry-run)` frames even when
   no motorcycle is connected). Export via **Share**/**Copy**.
-- **Repo hygiene:** `git status` shows no APK/keystore; `git check-ignore apk/base.apk build/debug.keystore`
+- **Repo hygiene:** `git status` shows no APK/keystore; `git check-ignore wazeology.apk apk/base.apk build/debug.keystore`
   confirms they're ignored.
 
 ---
@@ -289,8 +296,7 @@ adb install -r build/gen/wazeology.apk
 |---|---|
 | Route card / some screens crash with `InflateException` | apktool rebuilt resources. Use the graft (§3/§7); never ship rebuilt resources. |
 | `javac … Unable to find method metafactory` | `android.jar` on `-bootclasspath`. Put it on `-classpath` (§6). |
-| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / signature mismatch | a differently-signed Waze is installed. `adb uninstall com.waze` first (§8). |
-| `adb devices` empty inside container | host adb server owns the USB device; `adb kill-server` on host (§8). |
+| `INSTALL_FAILED_UPDATE_INCOMPATIBLE` / signature mismatch | a differently-signed Waze is installed. Uninstall the existing Waze first (§8). |
 | Motorcycle never appears in Scan | it may not advertise the service UUID; the scan surfaces all named devices too — pick by name/MAC. Confirm Bluetooth + location permissions were granted. |
 | Distance shows stale/zero | ensure the distance hook is before the final `return-void`, not at method entry (§4). |
 
@@ -299,8 +305,8 @@ adb install -r build/gen/wazeology.apk
 ## 11. Bundle the base and splits into one apk (`scripts/build.sh`)
 
 The graft (§7) produces the patched base. The last step bundles it with the config splits into one standalone
-apk, `build/gen/wazeology.apk`. That apk carries the base code and manifest, the arm64 native libs, and the
-density and language resources under one `resources.arsc`, and it installs with a plain `adb install`.
+apk, `./wazeology.apk` at the repo root. That apk carries the base code and manifest, the arm64 native libs,
+and the density and language resources under one `resources.arsc`, and you sideload it onto the device (§8).
 
 Bundling means merging the split resource tables into one, which sounds like what the golden rule (§3)
 forbids. It is not: the rule's constraint is that aapt2 must not recompile the resource XML, because that is

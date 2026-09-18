@@ -8,7 +8,12 @@ require_image
 require_apk
 
 mkdir -p "$BUILD_DIR"
+# Skip when the workspace already holds a decompile. FORCE=1 discards it and decompiles afresh.
 if [ -d "$DECOMP_DIR" ]; then
+    if [ -z "${FORCE:-}" ]; then
+        log "build/base_apktool already present — skipping decompile (set FORCE=1 to re-decompile)"
+        exit 0
+    fi
     log "removing previous decompile ($DECOMP_DIR)"
     rm -rf "$DECOMP_DIR"
 fi

@@ -5,6 +5,12 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 require_image
 
+# Skip the (slow) download when the workspace already holds the normalized apks. FORCE=1 re-fetches.
+if [ -z "${FORCE:-}" ] && [ -f "$APK_DIR/base.apk" ] && ls "$APK_DIR"/split_config.*.apk >/dev/null 2>&1; then
+    log "apk/base.apk + splits already present — skipping download (set FORCE=1 to re-fetch)"
+    exit 0
+fi
+
 mkdir -p "$APK_DIR/_dl"
 rm -rf "${APK_DIR:?}/_dl"/*
 

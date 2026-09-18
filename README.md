@@ -61,16 +61,16 @@ wazeology builds and installs entirely through the scripts in `scripts/`. The on
 host is Docker; the whole Android toolchain runs inside a pinned image.
 
 ```bash
-cp .env.example .env       # optional: set DEVICE_SERIAL, download source, etc.
+cp .env.example .env       # optional: set download source, languages, etc.
 scripts/build-image.sh     # once: build the pinned toolchain image (~1.5 GB first time)
 scripts/fetch-apk.sh       # download the pinned Waze 5.23.0.2 (apkeep -> apk/, gitignored)
 ```
 
 ### Dependencies
 
-- Docker is the only host dependency. apktool, the Android build-tools, apkeep, the JDK, and adb all run
+- Docker is the only host dependency. apktool, the Android build-tools, apkeep, and the JDK all run
   inside the pinned toolchain image that `scripts/build-image.sh` builds.
-- An Android device reachable by `adb`, over USB or over your network, for the install step.
+- An Android device to install the built apk on, by sideloading `./wazeology.apk`.
 
 A few notes on inputs and reproducibility:
 
@@ -84,10 +84,10 @@ A few notes on inputs and reproducibility:
 
 ## Usage
 
-Build and install in one shot (fetch is idempotent):
+Build in one shot:
 
 ```bash
-scripts/all.sh             # fetch -> decompile -> patch -> build -> install
+scripts/all.sh             # fetch -> decompile -> patch -> build
 ```
 
 Or step by step:
@@ -97,12 +97,18 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh      # off-bike frame byte-layout test
-scripts/build.sh           # compile Wazeology package -> dex, graft, bundle base + splits into build/gen/wazeology.apk
-scripts/install.sh         # adb install build/gen/wazeology.apk
+scripts/build.sh           # compile Wazeology package -> dex, graft, bundle base + splits into ./wazeology.apk
 ```
+
+`fetch-apk.sh` and `decompile.sh` skip their work when their outputs are already in the workspace, so re-runs
+are fast. Setting `FORCE=1` (as in `FORCE=1 scripts/all.sh`) re-downloads and re-decompiles from scratch.
 
 The bundled apk includes every language Waze ships. To include only some, set `LANGS`, for example
 `LANGS="pt en" scripts/all.sh` (or `scripts/build.sh`). The device ABI and screen density are always included.
+
+The build leaves `./wazeology.apk` at the repo root. Install it on your device by sideloading: copy it over
+and open it with the device's package installer, or run `adb install ./wazeology.apk` from a machine that has
+adb. (Installing over the Play Store Waze needs that copy uninstalled first, since the signatures differ.)
 
 Then, on the device: open the **Wazeology** icon → **Scan** → tap your motorcycle → accept the passkey on
 the cluster. Start a Waze route; turn-by-turn frames flow to the cluster. The in-app **Log** has **Share** /
