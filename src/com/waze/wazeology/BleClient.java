@@ -12,6 +12,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -67,6 +68,7 @@ public final class BleClient {
     private int subscribeIndex;
     private boolean bondReceiverRegistered;
     private Capabilities capabilities;
+    private int lastBatteryNibble = -1;   // last battery segment sent, so the meter tick only logs on change
     // Per-handle progress toward the MTU step; the stack may deliver onMtuChanged before discovery.
     private boolean servicesDiscovered;
     private boolean mtuSeen;
@@ -113,7 +115,8 @@ public final class BleClient {
             }
             boolean meterOk = capabilities == null || capabilities.meterIndicationSupported;
             if (state == State.READY && meterOk && !alreadyQueued) {
-                enqueue(new Command("meter indication (13)", Frames.meterIndication(), Kawasaki.OP_METER_INDICATION));
+                byte[] frame = Frames.meterIndication(readBatteryNibble(), 15, 3, 0);
+                enqueue(new Command("meter indication (13)", frame, Kawasaki.OP_METER_INDICATION));
             }
             main.postDelayed(this, METER_TICK_MS);
         }
@@ -657,6 +660,31 @@ public final class BleClient {
                 return;
         }
         main.postDelayed(setupTimeout, ms);
+    }
+
+    /** Reads the phone battery via the sticky ACTION_BATTERY_CHANGED intent and maps it to the cluster's
+     *  battery segment code. Registering a null receiver is a synchronous query of the last sticky intent:
+     *  nothing is registered, so there is no receiver to unregister. A null intent or missing extras read as
+     *  unknown -> NOT_AVAILABLE. Logs only when the segment changes, to avoid spamming at the meter cadence. */
+    private int readBatteryNibble() {
+        int pct = -1;
+        boolean charging = false;
+        Intent battery = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        if (battery != null) {
+            int level = battery.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+            int scale = battery.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+            if (level >= 0 && scale > 0) {
+                pct = (int) Math.floor(level * 100.0 / scale);
+            }
+            charging = battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
+        }
+        int nibble = Frames.batteryNibble(pct, charging);
+        if (nibble != lastBatteryNibble) {
+            log("battery " + (pct < 0 ? "unknown" : pct + "%") + (charging ? " charging" : "")
+                + " -> segment 0x" + Integer.toHexString(nibble).toUpperCase());
+            lastBatteryNibble = nibble;
+        }
+        return nibble;
     }
 
     private void log(String line) {

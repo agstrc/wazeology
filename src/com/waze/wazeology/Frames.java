@@ -89,6 +89,9 @@ public final class Frames {
         };
     }
 
+    // Each nibble is a segment code, not a level: battery 0xF = NOT_AVAILABLE (full is 0x3, see batteryNibble),
+    // voice 0xF = NOT_AVAILABLE, headset 3 = NOT_AVAILABLE, ridingLog 0 = OFF. So the no-arg default draws
+    // nothing on the cluster's status row until a live value is supplied.
     public static byte[] meterIndication() {
         return meterIndication(15, 15, 3, 0);
     }
@@ -98,6 +101,31 @@ public final class Frames {
         frame[7] = (byte) ((battery << 4) | (voice & 0x0F));
         frame[8] = (byte) ((headset << 4) | (ridingLog & 0x0F));
         return frame;
+    }
+
+    /**
+     * Maps a phone battery percentage (0-100, or negative when unknown) to the cluster's battery segment
+     * code for byte 7 of the 0x13 frame. This is a bucketed segment code, NOT a linear 0-15 scale; the
+     * buckets and the charging override mirror the OEM Rideology app (validated on hardware): charging shows
+     * the dedicated charging segment regardless of level, and only four discharge steps exist.
+     */
+    public static int batteryNibble(int pct, boolean charging) {
+        if (charging) {
+            return 0x07; // CHARGING_SEGMENT_ON_0 (overrides level)
+        }
+        if (pct <= 0) {
+            return 0x0F; // NOT_AVAILABLE (unknown / unreadable / empty)
+        }
+        if (pct <= 10) {
+            return 0x00; // Low_Battery_Warning
+        }
+        if (pct <= 30) {
+            return 0x01; // SEGMENT_ON_1
+        }
+        if (pct <= 70) {
+            return 0x02; // SEGMENT_ON_2
+        }
+        return 0x03;     // SEGMENT_ON_3 (full)
     }
 
     public static byte[] turnByTurn(FlagMode flag, TurnType turn, DistanceUnit unit, int distance) {

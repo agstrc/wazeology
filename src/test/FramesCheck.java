@@ -35,6 +35,22 @@ public class FramesCheck {
         byte[] meter = Frames.meterIndication();
         eq("meterIndication()", Frames.hex(meter), "13 0C 00 FF FF 05 00 FF 30 FF FF FF FF FF FF");
 
+        // battery segment buckets (mirror Rideology): charging overrides level; only 4 discharge steps.
+        true_("batteryNibble unknown -> F", Frames.batteryNibble(-1, false) == 0x0F);
+        true_("batteryNibble 0 -> F", Frames.batteryNibble(0, false) == 0x0F);
+        true_("batteryNibble 5 -> 0", Frames.batteryNibble(5, false) == 0x00);
+        true_("batteryNibble 10 -> 0", Frames.batteryNibble(10, false) == 0x00);
+        true_("batteryNibble 25 -> 1", Frames.batteryNibble(25, false) == 0x01);
+        true_("batteryNibble 30 -> 1", Frames.batteryNibble(30, false) == 0x01);
+        true_("batteryNibble 50 -> 2", Frames.batteryNibble(50, false) == 0x02);
+        true_("batteryNibble 70 -> 2", Frames.batteryNibble(70, false) == 0x02);
+        true_("batteryNibble 85 -> 3", Frames.batteryNibble(85, false) == 0x03);
+        true_("batteryNibble 100 -> 3", Frames.batteryNibble(100, false) == 0x03);
+        true_("batteryNibble charging overrides low", Frames.batteryNibble(5, true) == 0x07);
+        true_("batteryNibble charging overrides full", Frames.batteryNibble(100, true) == 0x07);
+        eq("meterIndication(2,15,3,0)", Frames.hex(Frames.meterIndication(2, 15, 3, 0)),
+            "13 0C 00 FF FF 05 00 2F 30 FF FF FF FF FF FF");
+
         byte[] pn = Frames.phoneName("Pixel 8");
         true_("phoneName length 35", pn.length == 35);
         eq("phoneName header+block0", Frames.hex(java.util.Arrays.copyOfRange(pn, 0, 14)),
