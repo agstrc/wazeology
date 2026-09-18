@@ -55,6 +55,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     private ClusterBridge bridge;
     private Palette palette;
+    private Strings strings;
 
     // Connection card views, all re-rendered through render().
     private TextView headerCaption;
@@ -98,6 +99,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         setTitle("Wazeology");
         bridge = ClusterBridge.get(this);
         palette = new Palette(this);
+        strings = new Strings(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -148,9 +150,9 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         bar.setBackground(bg);
         bar.setPadding(dp(4), dp(4), dp(4), dp(4));
 
-        motorcycleTab = tabButton("Motorcycle");
+        motorcycleTab = tabButton(strings.tabMotorcycle);
         motorcycleTab.setOnClickListener(v -> showLogTab(false));
-        logTab = tabButton("Log");
+        logTab = tabButton(strings.tabLog);
         logTab.setOnClickListener(v -> showLogTab(true));
         bar.addView(motorcycleTab, equalWeight());
         bar.addView(logTab, equalWeight());
@@ -174,7 +176,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         scroll.addView(col);
 
         LinearLayout connCard = card();
-        connCard.addView(title("Connection"));
+        connCard.addView(title(strings.connection));
 
         // Status row: a coloured state dot + a bold state label.
         LinearLayout statusRow = new LinearLayout(this);
@@ -214,16 +216,16 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         connCard.addView(unsupportedBanner);
 
         // One contextual primary action (Scan / Connect / Disconnect) + a secondary Forget.
-        primaryBtn = filledButton("Scan for motorcycle");
+        primaryBtn = filledButton(strings.scanForMotorcycle);
         connCard.addView(primaryBtn);
-        forgetBtn = outlinedButton("Forget");
+        forgetBtn = outlinedButton(strings.forget);
         forgetBtn.setOnClickListener(v -> bridge.forget());
         connCard.addView(forgetBtn);
 
         col.addView(connCard);
 
         devCard = card();
-        devCard.addView(title("Devices"));
+        devCard.addView(title(strings.devices));
         deviceList = new LinearLayout(this);
         deviceList.setOrientation(LinearLayout.VERTICAL);
         showDevices(new ArrayList<BluetoothDevice>());
@@ -236,14 +238,14 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     private View buildPasskeyBanner() {
         return banner(palette.primaryContainer, palette.onPrimaryContainer, "🔑",
-            "Confirm pairing",
-            "Check the passkey on your cluster matches the phone's, then confirm on both.");
+            strings.passkeyTitle,
+            strings.passkeyBody);
     }
 
     private View buildUnsupportedBanner() {
         return banner(palette.errorContainer, palette.onErrorContainer, "⚠",
-            "This cluster can't show navigation",
-            "It's a different model or firmware than Wazeology supports.");
+            strings.unsupportedTitle,
+            strings.unsupportedBody);
     }
 
     /** A rounded, filled attention banner: a leading glyph beside a bold title and a body line. */
@@ -301,11 +303,11 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
         LinearLayout logActions = new LinearLayout(this);
         logActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button share = filledButton("Share");
+        Button share = filledButton(strings.share);
         share.setOnClickListener(v -> shareLog());
-        Button copy = outlinedButton("Copy");
+        Button copy = outlinedButton(strings.copy);
         copy.setOnClickListener(v -> copyLog());
-        Button clear = outlinedButton("Clear");
+        Button clear = outlinedButton(strings.clear);
         clear.setOnClickListener(v -> {
             bridge.clearLog();
             logBuffer.setLength(0);
@@ -367,15 +369,15 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     private void shareLog() {
         Intent send = new Intent(Intent.ACTION_SEND);
         send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, "Kawasaki motorcycle log");
+        send.putExtra(Intent.EXTRA_SUBJECT, strings.shareSubject);
         send.putExtra(Intent.EXTRA_TEXT, bridge.getLog());
-        startActivity(Intent.createChooser(send, "Share motorcycle log"));
+        startActivity(Intent.createChooser(send, strings.shareChooser));
     }
 
     private void copyLog() {
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("Kawasaki motorcycle log", bridge.getLog()));
+            cm.setPrimaryClip(ClipData.newPlainText(strings.shareSubject, bridge.getLog()));
             appendLog("(log copied to clipboard)");
         }
     }
@@ -503,7 +505,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                     name = null;
                 }
                 final BluetoothDevice device = d;
-                deviceList.addView(deviceRow(name == null ? "(unnamed)" : name, d.getAddress(),
+                deviceList.addView(deviceRow(name == null ? strings.unnamed : name, d.getAddress(),
                     v -> bridge.connect(device)));
             }
         }
@@ -562,36 +564,36 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         String label;
         switch (u) {
             case CONNECTED:
-                label = "Connected";
+                label = strings.connected;
                 break;
             case PAIRING:
-                label = "Pairing — enter passkey";
+                label = strings.pairing;
                 break;
             case WAITING:
-                label = "Waiting for " + targetName() + "…";
+                label = strings.waitingFor(targetName());
                 break;
             case CONNECTING:
-                label = mState == BleClient.State.SUBSCRIBING ? "Subscribing…"
-                    : mState == BleClient.State.INITIALIZING ? "Initializing…"
-                    : "Connecting to " + targetName() + "…";
+                label = mState == BleClient.State.SUBSCRIBING ? strings.subscribing
+                    : mState == BleClient.State.INITIALIZING ? strings.initializing
+                    : strings.connectingTo(targetName());
                 break;
             case PAUSED:
-                label = "Saved: " + targetName() + " — disconnected";
+                label = strings.savedDisconnected(targetName());
                 break;
             case OFFLINE:
                 label = bridge.hasSavedDevice()
-                    ? "Saved: " + targetName() + " — Bluetooth off" : "Bluetooth is off";
+                    ? strings.savedBluetoothOff(targetName()) : strings.bluetoothOff;
                 break;
             case SAVED_UNBONDED:
-                label = "Saved: " + targetName() + " — needs pairing";
+                label = strings.savedNeedsPairing(targetName());
                 break;
             case NONE:
             default:
-                label = "Not connected";
+                label = strings.notConnected;
                 break;
         }
         if (permBlocked) {
-            label = "Bluetooth permission needed"; // recovery offered on the primary button below
+            label = strings.permissionNeeded; // recovery offered on the primary button below
         }
 
         // Error states get the error colour + a filled error dot; the unsupported suffix moved to a banner.
@@ -629,7 +631,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
         // Cue line: only while connected and actually navigating (the idle default is "No navigation").
         if (u == UiState.CONNECTED && !mCue.isEmpty() && !mCue.equalsIgnoreCase("No navigation")) {
-            cueLabel.setText("Cue: " + mCue);
+            cueLabel.setText(strings.cuePrefix + mCue);
             cueLabel.setVisibility(View.VISIBLE);
         } else {
             cueLabel.setVisibility(View.GONE);
@@ -641,28 +643,28 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         // Contextual primary action. No Stop/Cancel: a saved motorcycle is waited for until Forget.
         boolean primaryEnabled = true;
         if (u == UiState.OFFLINE) {
-            setPrimary("Turn on Bluetooth", v -> openBluetooth());
+            setPrimary(strings.turnOnBluetooth, v -> openBluetooth());
         } else if (permBlocked) {
-            setPrimary("Open app settings", v -> openAppSettings());
+            setPrimary(strings.openAppSettings, v -> openAppSettings());
         } else if (scanning) {
-            setPrimary("Scanning…", null);
+            setPrimary(strings.scanning, null);
             primaryEnabled = false;
         } else {
             switch (u) {
                 case CONNECTED:
-                    setPrimary("Disconnect", v -> bridge.disconnect());
+                    setPrimary(strings.disconnect, v -> bridge.disconnect());
                     break;
                 case WAITING:
                 case PAUSED:
-                    setPrimary("Connect now", v -> ensurePermissionsThen(bridge::connectNow));
+                    setPrimary(strings.connectNow, v -> ensurePermissionsThen(bridge::connectNow));
                     break;
                 case CONNECTING:
                 case PAIRING:
-                    setPrimary("Connect", null);
+                    setPrimary(strings.connect, null);
                     primaryEnabled = false;
                     break;
                 default:
-                    setPrimary("Scan for motorcycle", v -> ensurePermissionsThen(this::doScan));
+                    setPrimary(strings.scanForMotorcycle, v -> ensurePermissionsThen(this::doScan));
                     break;
             }
         }
@@ -677,11 +679,11 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         if (devicePlaceholder != null) {
             String placeholder;
             if (scanning) {
-                placeholder = "Searching for your motorcycle…";
+                placeholder = strings.searchingDevices;
             } else if (bridge.scanAttempted()) {
-                placeholder = "No motorcycle found. Make sure the cluster is powered on, then scan again.";
+                placeholder = strings.noMotorcycleFound;
             } else {
-                placeholder = "(no devices yet — tap Scan)";
+                placeholder = strings.noDevicesYet;
             }
             devicePlaceholder.setText(placeholder);
         }
@@ -715,7 +717,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     private String targetName() {
         String n = bridge.currentTargetLabel();
-        return n == null ? "motorcycle" : n;
+        return n == null ? strings.motorcycleFallback : n;
     }
 
     /** Draws the status dot: a hollow ring (at rest) or a filled disc, so state reads without relying on
@@ -914,7 +916,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         row.setBackground(rippled(withAlpha(palette.primary, 0x33), bg));
         row.setClickable(true);
         row.setFocusable(true);
-        row.setContentDescription("Connect to " + name);
+        row.setContentDescription(strings.connectToPrefix + name);
         row.setOnClickListener(onClick);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -978,7 +980,7 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         t.setBackground(rippled(withAlpha(palette.primary, 0x33), bg));
         t.setTextColor(selected ? palette.onPrimaryContainer : palette.onSurfaceVariant);
         t.setSelected(selected);
-        t.setContentDescription(t.getText() + (selected ? ", selected" : ""));
+        t.setContentDescription(t.getText() + (selected ? strings.selectedSuffix : ""));
     }
 
     private Drawable rippled(int rippleColor, Drawable content) {
