@@ -1,6 +1,9 @@
         <!-- wazeology:begin -->
         <activity android:exported="true" android:icon="@mipmap/launch_icon_round" android:label="Wazeology" android:launchMode="singleTask" android:taskAffinity="com.waze.wazeology" android:name="com.waze.wazeology.WazeologyActivity">
-            <intent-filter>
+            <!-- priority -1: keep the launcher icon, but lose the getLaunchIntentForPackage("com.waze")
+                 tiebreak to Waze's own FreeMapAppActivity (default priority 0) so external apps that open
+                 Waze by package land on Waze, not Wazeology. Home-screen launchers list both regardless. -->
+            <intent-filter android:priority="-1">
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
