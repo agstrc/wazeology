@@ -1,5 +1,7 @@
 # wazeology
 
+**English** · [Português (Brasil)](README.pt-BR.md)
+
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
 Patch the Waze Android app to drive a Rideology-compatible Kawasaki BLE5 TFT instrument cluster over BLE.
