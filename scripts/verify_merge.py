@@ -6,7 +6,7 @@ APKEditor's binary merge rebuilds the resource TABLE but copies every res/* FILE
 asserts exactly that: in the final bundled apk, no pristine-base res/* file has changed except the ones
 the graft itself intentionally patched (the launcher icon), and the only dropped entry is the obsolete
 split descriptor. It also checks the native .so are STORED (extractNativeLibs=false) and the patched dex
-survived. Exit non-zero on any violation so scripts/merge.sh fails loudly.
+survived. Exit non-zero on any violation so scripts/build.sh fails loudly.
 
 Args: <pristine base.apk> <grafted build/gen/base.apk> <final build/gen/wazeology.apk>
 """

@@ -24,8 +24,8 @@ scripts/fetch-apk.sh     # download the pinned Waze (apkeep -> apk/, gitignored)
 scripts/decompile.sh     # apktool d -> build/base_apktool
 scripts/patch.sh         # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh    # off-bike frame byte-layout test (build.sh also runs this as a gate)
-scripts/build.sh         # compile the Wazeology package -> dex, graft onto the pristine base
-scripts/merge.sh         # bundle the base + splits into one apk (build/gen/wazeology.apk), §11
+scripts/build.sh         # compile the Wazeology package -> dex, graft onto the pristine base, then
+                         # bundle the base + splits into one signed apk (build/gen/wazeology.apk), §11
 scripts/install.sh       # adb install build/gen/wazeology.apk
 ```
 
@@ -248,9 +248,9 @@ compression, and:
 
 ---
 
-## 8. Sign and install the bundled apk (`scripts/merge.sh` + `scripts/install.sh`)
+## 8. Sign and install the bundled apk (`scripts/build.sh` + `scripts/install.sh`)
 
-The graft (§7) leaves an unsigned intermediate `build/gen/base.apk`. `merge.sh` (§11) bundles it with the
+The graft (§7) leaves an unsigned intermediate `build/gen/base.apk`. `build.sh` (§11) bundles it with the
 splits, aligns, and signs the result:
 
 ```
@@ -296,7 +296,7 @@ adb install -r build/gen/wazeology.apk
 
 ---
 
-## 11. Bundle the base and splits into one apk (`scripts/merge.sh`)
+## 11. Bundle the base and splits into one apk (`scripts/build.sh`)
 
 The graft (§7) produces the patched base. The last step bundles it with the config splits into one standalone
 apk, `build/gen/wazeology.apk`. That apk carries the base code and manifest, the arm64 native libs, and the
@@ -306,7 +306,7 @@ Bundling means merging the split resource tables into one, which sounds like wha
 forbids. It is not: the rule's constraint is that aapt2 must not recompile the resource XML, because that is
 what corrupts the route-card drawable. Changing `resources.arsc` is fine.
 
-`merge.sh` runs **APKEditor** (`apkeditor m`, ARSCLib), which merges the base and split resource tables at the
+`build.sh` runs **APKEditor** (`apkeditor m`, ARSCLib), which merges the base and split resource tables at the
 binary level and copies every `res/*` entry verbatim. It never invokes aapt2 on resource XML, so the
 corruption cannot happen: the `abc_switch_thumb_material.xml` binary is byte-identical before and after.
 APKEditor also sanitizes the manifest (it drops `requiredSplitTypes`, `isSplitRequired`, the
@@ -314,12 +314,12 @@ APKEditor also sanitizes the manifest (it drops `requiredSplitTypes`, `isSplitRe
 OS accepts the result as a standalone apk.
 
 `LANGS` selects which language splits to bundle. The default, `all`, bundles every language apkeep fetched.
-Set it to a space-separated list to bundle fewer, for example `LANGS="pt en" scripts/merge.sh`. The ABI and
+Set it to a space-separated list to bundle fewer, for example `LANGS="pt en" scripts/build.sh`. The ABI and
 density splits are always bundled. A Play install on a device carries only that device's languages, so a
 subset is closer to a Play install, though the size difference is small: the language splits are tiny next to
 the base and the native libs.
 
-`merge.sh` ends with a proof gate (`scripts/verify_merge.py`). It diffs the final apk's `res/*` against the
+`build.sh` ends with a proof gate (`scripts/verify_merge.py`). It diffs the final apk's `res/*` against the
 pristine `apk/base.apk` and fails unless the only changed entries are the ones the graft intentionally patched
 (the launcher icon, §5.1) and the only dropped entry is `res/xml/splits0.xml`. That check confirms the merge
 rebuilt the resource table while leaving every resource file verbatim. It also asserts the native `.so` are

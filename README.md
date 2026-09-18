@@ -87,7 +87,7 @@ A few notes on inputs and reproducibility:
 Build and install in one shot (fetch is idempotent):
 
 ```bash
-scripts/all.sh             # fetch -> decompile -> patch -> build -> merge -> install
+scripts/all.sh             # fetch -> decompile -> patch -> build -> install
 ```
 
 Or step by step:
@@ -97,13 +97,12 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # inject 4 smali hooks + the launcher <activity>
 scripts/framecheck.sh      # off-bike frame byte-layout test
-scripts/build.sh           # compile Wazeology package -> dex, graft onto the pristine base
-scripts/merge.sh           # bundle base + splits into build/gen/wazeology.apk
+scripts/build.sh           # compile Wazeology package -> dex, graft, bundle base + splits into build/gen/wazeology.apk
 scripts/install.sh         # adb install build/gen/wazeology.apk
 ```
 
 The bundled apk includes every language Waze ships. To include only some, set `LANGS`, for example
-`LANGS="pt en" scripts/all.sh` (or `scripts/merge.sh`). The device ABI and screen density are always included.
+`LANGS="pt en" scripts/all.sh` (or `scripts/build.sh`). The device ABI and screen density are always included.
 
 Then, on the device: open the **Wazeology** icon → **Scan** → tap your motorcycle → accept the passkey on
 the cluster. Start a Waze route; turn-by-turn frames flow to the cluster. The in-app **Log** has **Share** /

@@ -88,7 +88,7 @@ Algumas observações sobre entradas e reprodutibilidade:
 Compile e instale de uma vez só (o fetch é idempotente):
 
 ```bash
-scripts/all.sh             # baixa -> decompila -> aplica patch -> compila -> empacota -> instala
+scripts/all.sh             # baixa -> decompila -> aplica patch -> compila -> instala
 ```
 
 Ou passo a passo:
@@ -98,13 +98,12 @@ scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
 scripts/decompile.sh       # build/base_apktool
 scripts/patch.sh           # injeta 4 hooks smali + a <activity> do atalho
 scripts/framecheck.sh      # teste de layout dos bytes do frame, sem a moto
-scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta
-scripts/merge.sh           # empacota base + splits em build/gen/wazeology.apk
+scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta, empacota base + splits em build/gen/wazeology.apk
 scripts/install.sh         # adb install build/gen/wazeology.apk
 ```
 
 O apk empacotado inclui todos os idiomas que o Waze traz. Para incluir só alguns, defina `LANGS`, por exemplo
-`LANGS="pt en" scripts/all.sh` (ou `scripts/merge.sh`). A ABI do aparelho e a densidade de tela entram sempre.
+`LANGS="pt en" scripts/all.sh` (ou `scripts/build.sh`). A ABI do aparelho e a densidade de tela entram sempre.
 
 Depois, no aparelho: abra o ícone **Wazeology** → **Scan** → toque na sua moto → aceite o pareamento no painel.
 (A tela Wazeology é em inglês.) Inicie uma rota no Waze e os frames de navegação passam a fluir para o painel.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the bundled apk (build/gen/wazeology.apk from scripts/merge.sh) to a connected device via
+# Install the bundled apk (build/gen/wazeology.apk from scripts/build.sh) to a connected device via
 # adb (in container). If Waze is already installed with a different signature (e.g. the Play build),
 # uninstall it first: adb uninstall com.waze.
 set -euo pipefail
@@ -8,7 +8,7 @@ require_image
 cd "$REPO_ROOT"
 
 if [ ! -f "build/gen/wazeology.apk" ]; then
-    echo "build/gen/wazeology.apk missing. Run scripts/merge.sh first" >&2
+    echo "build/gen/wazeology.apk missing. Run scripts/build.sh first" >&2
     exit 1
 fi
 
