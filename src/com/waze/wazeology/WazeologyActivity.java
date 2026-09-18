@@ -313,6 +313,11 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
             logBuffer.setLength(0);
             logView.setText("");
         });
+        // Three buttons share a row, so a long label (e.g. pt-BR "Compartilhar") would wrap to a second
+        // line and make its button taller than the others. Keep each on one line and let it shrink to fit.
+        compactRowButton(share);
+        compactRowButton(copy);
+        compactRowButton(clear);
         logActions.addView(share, equalWeightMargin(0, dp(6)));
         logActions.addView(copy, equalWeightMargin(dp(6), dp(6)));
         logActions.addView(clear, equalWeightMargin(dp(6), 0));
@@ -878,6 +883,14 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         lp.bottomMargin = dp(16);
         c.setLayoutParams(lp);
         return c;
+    }
+
+    /** Tightens a button for a shared, equal-weight row: single line with trimmed side padding, and text
+     *  that auto-shrinks to fit so a long localized label never wraps or overflows its third of the row. */
+    private void compactRowButton(Button b) {
+        b.setMaxLines(1);
+        b.setPadding(dp(10), dp(10), dp(10), dp(10));
+        b.setAutoSizeTextTypeUniformWithConfiguration(11, 14, 1, TypedValue.COMPLEX_UNIT_SP);
     }
 
     private Button filledButton(String text) {
