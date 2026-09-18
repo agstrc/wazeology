@@ -167,9 +167,10 @@ def patch_manifest(tree):
     with open(os.path.join(PATCHES_DIR, "manifest-activity.xml")) as f:
         snippet = f.read().rstrip("\n")
 
-    # Update-safe: if our activity is already present, strip it first so an edited snippet
-    # (e.g. new launchMode/taskAffinity) is re-applied rather than skipped.
-    existing = re.search(r"\s*<activity\b[^>]*com\.waze\.wazeology\.WazeologyActivity.*?</activity>", text, re.S)
+    # Update-safe: the injected block (activity + provider) is delimited by wazeology:begin/end markers.
+    # If it's already present, strip the whole block first so an edited snippet is re-applied rather than
+    # skipped, and so re-running never duplicates the provider. Comments are ignored by apktool's build.
+    existing = re.search(r"\s*<!-- wazeology:begin -->.*?<!-- wazeology:end -->", text, re.S)
     if existing:
         current = existing.group(0).strip()
         if current == snippet.strip():
@@ -178,7 +179,14 @@ def patch_manifest(tree):
         text = text[:existing.start()] + text[existing.end():]
         action = "updated"
     else:
-        action = "applied"
+        # Legacy: a tree injected by an older, marker-less version of this script has a bare <activity>
+        # (and no provider). Strip it so the transition to the marker block doesn't duplicate the activity.
+        legacy = re.search(r"\s*<activity\b[^>]*com\.waze\.wazeology\.WazeologyActivity.*?</activity>", text, re.S)
+        if legacy:
+            text = text[:legacy.start()] + text[legacy.end():]
+            action = "updated"
+        else:
+            action = "applied"
 
     m = re.search(r"<application\b[^>]*>", text)
     if not m:

@@ -33,6 +33,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -372,11 +373,27 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     }
 
     private void shareLog() {
-        Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT, strings.shareSubject);
-        send.putExtra(Intent.EXTRA_TEXT, bridge.getLog());
-        startActivity(Intent.createChooser(send, strings.shareChooser));
+        // Share the full on-disk log as a file attachment, not inline EXTRA_TEXT: a large log exceeds the
+        // ~1 MB Binder transaction limit and would crash the chooser. The export decompresses archives and
+        // can be many MB, so build it on a background thread and fire the chooser back on the UI thread.
+        appendLog("(preparing log for sharing…)");
+        final File shareDir = new File(getCacheDir(), "wazeology-share");
+        new Thread(() -> {
+            final File f = bridge.exportFullLog(shareDir);
+            runOnUiThread(() -> {
+                if (f == null) {
+                    appendLog("(log export failed)");
+                    return;
+                }
+                Uri uri = Uri.parse("content://" + LogFileProvider.AUTHORITY + "/" + f.getName());
+                Intent send = new Intent(Intent.ACTION_SEND);
+                send.setType("text/plain");
+                send.putExtra(Intent.EXTRA_SUBJECT, strings.shareSubject);
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(send, strings.shareChooser));
+            });
+        }, "wazeology-share").start();
     }
 
     private void copyLog() {

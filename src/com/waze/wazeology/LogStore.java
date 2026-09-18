@@ -10,6 +10,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
@@ -20,9 +21,12 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -140,6 +144,89 @@ final class LogStore {
             return new ArrayList<>(lines.subList(lines.size() - maxLines, lines.size()));
         }
         return lines;
+    }
+
+    /**
+     * Combine the whole on-disk history into a single plaintext file at {@code outFile}: every gzip
+     * archive decompressed oldest-to-newest, followed by the live active file. Runs on the IO thread
+     * (so it never races appends/rotation) and blocks the caller until done. Returns {@code outFile} on
+     * success or {@code null} on total failure. Call off the UI thread: the output can be many MB.
+     */
+    File exportCombined(final File outFile) {
+        Future<File> f = io.submit(new Callable<File>() {
+            @Override
+            public File call() {
+                Writer out = null;
+                try {
+                    File parent = outFile.getParentFile();
+                    if (parent != null && !parent.isDirectory()) {
+                        parent.mkdirs();
+                    }
+                    out = new OutputStreamWriter(new FileOutputStream(outFile, false), UTF8);
+                    // Oldest first: UTC timestamps in the name sort chronologically (same as prune()).
+                    File[] archives = listArchives();
+                    Arrays.sort(archives, new Comparator<File>() {
+                        @Override
+                        public int compare(File a, File b) {
+                            return a.getName().compareTo(b.getName());
+                        }
+                    });
+                    for (File a : archives) {
+                        copyGzip(a, out);
+                    }
+                    copyPlain(active, out);
+                    out.flush();
+                    return outFile;
+                } catch (Throwable ignored) {
+                    return null;
+                } finally {
+                    closeQuietly(out);
+                }
+            }
+        });
+        try {
+            return f.get();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Decompress one gzip archive into {@code out}; a corrupt archive is skipped, not fatal. */
+    private static void copyGzip(File src, Writer out) {
+        if (!src.isFile()) {
+            return;
+        }
+        Reader in = null;
+        try {
+            in = new InputStreamReader(new GZIPInputStream(new FileInputStream(src)), UTF8);
+            copy(in, out);
+        } catch (Throwable ignored) {
+        } finally {
+            closeQuietly(in);
+        }
+    }
+
+    /** Append the plaintext active file into {@code out} (mirrors readActiveTail's read pattern). */
+    private static void copyPlain(File src, Writer out) {
+        if (!src.isFile()) {
+            return;
+        }
+        Reader in = null;
+        try {
+            in = new InputStreamReader(new FileInputStream(src), UTF8);
+            copy(in, out);
+        } catch (Throwable ignored) {
+        } finally {
+            closeQuietly(in);
+        }
+    }
+
+    private static void copy(Reader in, Writer out) throws java.io.IOException {
+        char[] buf = new char[8192];
+        int n;
+        while ((n = in.read(buf)) != -1) {
+            out.write(buf, 0, n);
+        }
     }
 
     // ---- IO thread only ------------------------------------------------------------------------

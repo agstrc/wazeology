@@ -855,6 +855,15 @@ public final class ClusterBridge implements BleClient.Listener {
         return b.toString();
     }
 
+    /**
+     * Export the full on-disk history (all rotated archives, oldest-to-newest, then the live file) into a
+     * single plaintext file under {@code shareDir}, for the on-screen Share. Blocking; call off the UI
+     * thread. Returns the written file, or {@code null} on failure.
+     */
+    public File exportFullLog(File shareDir) {
+        return logStore.exportCombined(new File(shareDir, "wazeology-log.txt"));
+    }
+
     public void clearLog() {
         synchronized (logLines) {
             logLines.clear();
