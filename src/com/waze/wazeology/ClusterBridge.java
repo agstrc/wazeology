@@ -412,6 +412,17 @@ public final class ClusterBridge implements BleClient.Listener {
         ble.disconnect();
     }
 
+    /** The Cancel button shown while pairing: aborts the in-progress bond and stops trying until the user
+     *  acts again. Pauses like Disconnect and drops the live target so nothing re-arms and re-pops the
+     *  passkey dialog; the saved MAC (if any) is left untouched, so a cancelled re-pair falls back to the
+     *  "needs pairing" state rather than being forgotten. */
+    public void cancelPairing() {
+        paused = true;
+        main.removeCallbacks(rearm);
+        target = null;
+        ble.cancelPairing();
+    }
+
     /**
      * Arms the passive link if there is a target and nothing is pending. Idempotent; called at launch, after
      * a link loss (via {@link #rearm}), when Bluetooth comes back on, and once permissions are granted.

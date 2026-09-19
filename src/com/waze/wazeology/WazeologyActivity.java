@@ -743,7 +743,8 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         passkeyBanner.setVisibility(u == UiState.PAIRING ? View.VISIBLE : View.GONE);
         unsupportedBanner.setVisibility(unsupported ? View.VISIBLE : View.GONE);
 
-        // Contextual primary action. No Stop/Cancel: a saved motorcycle is waited for until Forget.
+        // Contextual primary action. The only Cancel is during PAIRING (below); otherwise a saved
+        // motorcycle is waited for until Forget.
         boolean primaryEnabled = true;
         if (u == UiState.OFFLINE) {
             setPrimary(strings.turnOnBluetooth, v -> openBluetooth());
@@ -762,9 +763,13 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
                     setPrimary(strings.connectNow, v -> ensurePermissionsThen(bridge::connectNow));
                     break;
                 case CONNECTING:
-                case PAIRING:
                     setPrimary(strings.connect, null);
                     primaryEnabled = false;
+                    break;
+                case PAIRING:
+                    // The one exception to "no Stop/Cancel": pairing can wedge (missing or wrong-variant
+                    // passkey dialog), so offer a Cancel that aborts the bond and resets to a clean state.
+                    setPrimary(strings.cancelPairing, v -> bridge.cancelPairing());
                     break;
                 default:
                     setPrimary(strings.scanForMotorcycle, v -> ensurePermissionsThen(this::doScan));

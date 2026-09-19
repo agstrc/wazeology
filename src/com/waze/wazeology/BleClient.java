@@ -132,6 +132,14 @@ public final class BleClient {
             if (!changed.getAddress().equals(device.getAddress())) {
                 return;
             }
+            if (BluetoothDevice.ACTION_PAIRING_REQUEST.equals(intent.getAction())) {
+                // Log-only: never consume the broadcast, so the system passkey dialog still shows. The
+                // variant tells us whether the OS asked for passkey entry (what the cluster needs, since it
+                // displays the code) or the wrong confirmation flow (a code screen with no input field).
+                int variant = intent.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1);
+                log("pairing request: variant " + variant + " (" + pairingVariantName(variant) + ")");
+                return;
+            }
             int bond = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
             if (bond == BluetoothDevice.BOND_BONDING) {
                 log("bonding in progress, enter the passkey shown on the cluster");
@@ -190,7 +198,35 @@ public final class BleClient {
     public void disconnect() {
         closeGatt();
         unregisterBondReceiver();
+        // Terminal teardown, so forget the device too (unlike the mid-bond closeGatt, which keeps it so the
+        // bond receiver can match and reopen). Makes a re-entrant cancelPairing() a clean no-op; every
+        // caller that reconnects (connect/waitFor) re-sets device first, and abandon() captured it earlier.
+        device = null;
         setState(State.IDLE);
+    }
+
+    /** User cancel while BONDING: stop the OS bond in progress (and drop any partial bond so a retry
+     *  starts clean), then fully reset to IDLE. The BOND_NONE that cancelBondProcess triggers arrives
+     *  async, after disconnect() has unregistered the receiver, so it cannot re-enter abandon; stale GATT
+     *  callbacks are rejected by the {@code g != gatt} guard. */
+    public void cancelPairing() {
+        BluetoothDevice d = device;
+        if (d != null) {
+            try {
+                d.getClass().getMethod("cancelBondProcess").invoke(d);
+            } catch (Throwable ignored) {
+                // hidden API not available on this stack; disconnect() still tears the attempt down
+            }
+            try {
+                if (d.getBondState() == BluetoothDevice.BOND_BONDED) {
+                    d.getClass().getMethod("removeBond").invoke(d);
+                }
+            } catch (Throwable ignored) {
+                // best effort; leave any bond in place if the stack won't remove it reflectively
+            }
+        }
+        log("pairing cancelled");
+        disconnect(); // closeGatt() + unregisterBondReceiver() + setState(IDLE) clears the setup watchdog
     }
 
     private void abandon(String reason) {
@@ -487,12 +523,14 @@ public final class BleClient {
                     log("connected (status " + status + "), discovering services");
                     g.discoverServices();
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    if (state == State.BONDING && device != null
-                            && device.getBondState() == BluetoothDevice.BOND_BONDING) {
-                        // Android often drops the ACL while createBond runs the encryption handshake. The
-                        // bond continues at the OS level, so keep BONDING and the receiver; BOND_BONDED
-                        // reopens the link, BOND_NONE tears it down. Only wait when the OS really is
-                        // mid-bond: if createBond never started one, nothing would ever fire.
+                    if (state == State.BONDING) {
+                        // Android often drops the ACL at the start of SMP pairing, sometimes before the
+                        // bond-state broadcast flips to BONDING. The bond continues at the OS level, so keep
+                        // BONDING and the receiver regardless of the instantaneous bond state; BOND_BONDED
+                        // reopens the link, BOND_NONE tears it down, and the 90 s BOND_TIMEOUT watchdog
+                        // (which survives closeGatt while state stays BONDING) bounds the wait if nothing
+                        // ever fires. Gating on getBondState()==BOND_BONDING here was a race that abandoned
+                        // the attempt when the drop landed before the state flipped.
                         log("link dropped while pairing (status " + status + "); waiting for bonding to finish");
                         closeGatt();
                         return;
@@ -625,14 +663,32 @@ public final class BleClient {
         return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
     }
 
+    /** Human name for a BluetoothDevice.PAIRING_VARIANT_* code (the constants are @hide, so the ints are
+     *  inlined). The one we want for the cluster is PASSKEY (1, phone types the code shown on the dash);
+     *  PASSKEY_CONFIRMATION (2) is the code-with-no-input screen that has been showing up wrongly. */
+    private static String pairingVariantName(int variant) {
+        switch (variant) {
+            case 0: return "PIN";
+            case 1: return "PASSKEY";
+            case 2: return "PASSKEY_CONFIRMATION";
+            case 3: return "CONSENT";
+            case 4: return "DISPLAY_PASSKEY";
+            case 5: return "DISPLAY_PIN";
+            case 6: return "OOB_CONSENT";
+            case 7: return "PIN_16_DIGITS";
+            default: return "unknown";
+        }
+    }
+
     private void registerBondReceiver() {
         if (bondReceiverRegistered) {
             return;
         }
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        filter.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST); // diagnostic, logged not consumed
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // Sent by the Bluetooth app (not system_server), which a NOT_EXPORTED receiver can miss on 33+.
-            // It is a protected broadcast, so only privileged senders can emit it: EXPORTED is safe.
+            // Both are protected broadcasts, so only privileged senders can emit them: EXPORTED is safe.
             context.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             context.registerReceiver(bondReceiver, filter);

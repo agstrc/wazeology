@@ -60,6 +60,7 @@ final class Strings {
     final String disconnect;
     final String connectNow;
     final String connect;
+    final String cancelPairing;
 
     // Devices-list placeholders
     final String searchingDevices;
@@ -109,6 +110,7 @@ final class Strings {
             disconnect         = "Desconectar";
             connectNow         = "Conectar agora";
             connect            = "Conectar";
+            cancelPairing      = "Cancelar pareamento";
             searchingDevices   = "Buscando sua moto…";
             noMotorcycleFound  = "Nenhuma moto encontrada. Confira se o painel está ligado e busque de novo.";
             noDevicesYet       = "(nenhum dispositivo ainda: toque em Buscar)";
@@ -148,6 +150,7 @@ final class Strings {
             disconnect         = "Disconnect";
             connectNow         = "Connect now";
             connect            = "Connect";
+            cancelPairing      = "Cancel pairing";
             searchingDevices   = "Searching for your motorcycle…";
             noMotorcycleFound  = "No motorcycle found. Make sure the cluster is powered on, then scan again.";
             noDevicesYet       = "(no devices yet — tap Scan)";
