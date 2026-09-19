@@ -25,6 +25,7 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.accessibility.AccessibilityEvent;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
@@ -41,12 +42,17 @@ import java.util.List;
  * Kawasaki motorcycle connection manager. Second launcher entry ("Wazeology"), same app/process as Waze.
  * Fully programmatic UI (no layout XML / no new resources) so the APK's resources stay pristine.
  * Styled as Material 3 (forest-green palette, elevated cards, filled/outlined buttons) reproduced with
- * framework primitives, and split into a Motorcycle tab and a Log tab. See {@link Palette}.
+ * framework primitives: a single screen with a compact "Activity" log card, and a full-log overlay opened
+ * on demand. See {@link Palette}.
  */
 public final class WazeologyActivity extends Activity implements ClusterBridge.Ui {
 
     private static final int REQ_PERMS = 41;
-    private static final int LOG_VIEW_MAX_CHARS = 6000;
+    // The full-log overlay holds a large recent tail; the compact card renders only its last few lines.
+    // Share still exports the entire on-disk history, so this cap bounds the TextView only; the full
+    // history stays on disk.
+    private static final int LOG_VIEW_MAX_CHARS = 200_000;
+    private static final int MINI_VIEW_MAX_CHARS = 2000;
 
     /** UI states derived deterministically from (BleClient.State, hasTarget, isPaused, hasSavedDevice,
      *  isBluetoothOn). */
@@ -89,10 +95,11 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     private final StringBuilder logBuffer = new StringBuilder();
 
     private ScrollView logScroll;
+    private TextView miniLogView;
+    private ScrollView miniLogScroll;
+    private TextView logOverlayHeading;
     private View motorcycleContent;
     private View logContent;
-    private TextView motorcycleTab;
-    private TextView logTab;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,17 +123,17 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         headerCaption.setLayoutParams(captionLp);
         headerCaption.setVisibility(View.GONE);
         root.addView(headerCaption);
-        root.addView(buildTabBar());
 
         FrameLayout content = new FrameLayout(this);
         content.setClipChildren(false);
+        LinearLayout.LayoutParams topGap = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        topGap.topMargin = dp(12);
         motorcycleContent = buildMotorcycleTab();
-        logContent = buildLogTab();
+        logContent = buildLogOverlay();
         content.addView(motorcycleContent);
         content.addView(logContent);
-        LinearLayout.LayoutParams contentLp =
-            new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        root.addView(content, contentLp);
+        root.addView(content, topGap);
 
         setContentView(root);
 
@@ -137,34 +144,10 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
             root.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         }
 
-        showLogTab(false);
+        logContent.setVisibility(View.GONE); // the full-log overlay opens only on demand
     }
 
-    // ---- tab scaffolding -----------------------------------------------------------------------
-
-    private View buildTabBar() {
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(palette.surfaceVariant);
-        bg.setCornerRadius(dp(22));
-        bar.setBackground(bg);
-        bar.setPadding(dp(4), dp(4), dp(4), dp(4));
-
-        motorcycleTab = tabButton(strings.tabMotorcycle);
-        motorcycleTab.setOnClickListener(v -> showLogTab(false));
-        logTab = tabButton(strings.tabLog);
-        logTab.setOnClickListener(v -> showLogTab(true));
-        bar.addView(motorcycleTab, equalWeight());
-        bar.addView(logTab, equalWeight());
-
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(12);
-        lp.bottomMargin = dp(12);
-        bar.setLayoutParams(lp);
-        return bar;
-    }
+    // ---- screen scaffolding --------------------------------------------------------------------
 
     private View buildMotorcycleTab() {
         ScrollView scroll = new ScrollView(this);
@@ -233,8 +216,73 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         devCard.addView(deviceList);
         col.addView(devCard);
 
+        col.addView(buildActivityCard());
+
         render();
         return scroll;
+    }
+
+    /** The compact log surface: a short heading row with "View full log" and a fixed-height mini log showing
+     *  the newest few lines. Full scrollback and the Share/Copy/Clear actions live in the overlay. */
+    private View buildActivityCard() {
+        LinearLayout c = card();
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView heading = title(strings.activity);
+        heading.setPadding(0, 0, 0, 0);
+        header.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button open = outlinedButton(strings.viewFullLog);
+        open.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        open.setContentDescription(strings.viewFullLog);
+        open.setOnClickListener(v -> showFullLog(true));
+        header.addView(open);
+        c.addView(header);
+
+        // Fixed-height mini log on a surface rounded rect nested inside the card (like a deviceRow).
+        miniLogScroll = new ScrollView(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(palette.surface);
+        bg.setCornerRadius(dp(12));
+        miniLogScroll.setBackground(bg);
+        int mp = dp(10);
+        miniLogScroll.setPadding(mp, mp, mp, mp);
+        miniLogScroll.setClipToPadding(false);
+        miniLogView = new TextView(this);
+        miniLogView.setTypeface(Typeface.MONOSPACE);
+        miniLogView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        miniLogView.setLineSpacing(dp(2), 1f);
+        miniLogView.setTextColor(palette.onSurface);
+        miniLogScroll.addView(miniLogView);
+        LinearLayout.LayoutParams miniLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(112));
+        miniLp.topMargin = dp(8);
+        c.addView(miniLogScroll, miniLp);
+        // Share/Copy/Clear live only in the full-log overlay, not here on the compact card.
+        return c;
+    }
+
+    /** The Share / Copy / Clear row for the full-log overlay. */
+    private View buildLogActions() {
+        LinearLayout logActions = new LinearLayout(this);
+        logActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button share = filledButton(strings.share);
+        share.setOnClickListener(v -> shareLog());
+        Button copy = outlinedButton(strings.copy);
+        copy.setOnClickListener(v -> copyLog());
+        Button clear = outlinedButton(strings.clear);
+        clear.setOnClickListener(v -> clearLogViews());
+        // Three buttons share a row, so a long label (e.g. pt-BR "Compartilhar") would wrap to a second
+        // line and make its button taller than the others. Keep each on one line and let it shrink to fit.
+        compactRowButton(share);
+        compactRowButton(copy);
+        compactRowButton(clear);
+        logActions.addView(share, equalWeightMargin(0, dp(6)));
+        logActions.addView(copy, equalWeightMargin(dp(6), dp(6)));
+        logActions.addView(clear, equalWeightMargin(dp(6), 0));
+        return logActions;
     }
 
     private View buildPasskeyBanner() {
@@ -295,37 +343,39 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         return row;
     }
 
-    private View buildLogTab() {
+    /** The full-log overlay: a top bar ("Log" + Close), the Share/Copy/Clear actions, a caption clarifying
+     *  the tail-vs-Share relationship, and the large selectable scrollback view. Opaque so it covers the
+     *  motorcycle content beneath; toggled visible by {@link #showFullLog}. */
+    private View buildLogOverlay() {
         LinearLayout col = new LinearLayout(this);
         col.setOrientation(LinearLayout.VERTICAL);
         col.setPadding(0, dp(2), 0, dp(16));
+        col.setBackgroundColor(palette.surface);
         col.setLayoutParams(new FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        LinearLayout logActions = new LinearLayout(this);
-        logActions.setOrientation(LinearLayout.HORIZONTAL);
-        Button share = filledButton(strings.share);
-        share.setOnClickListener(v -> shareLog());
-        Button copy = outlinedButton(strings.copy);
-        copy.setOnClickListener(v -> copyLog());
-        Button clear = outlinedButton(strings.clear);
-        clear.setOnClickListener(v -> {
-            bridge.clearLog();
-            logBuffer.setLength(0);
-            logView.setText("");
-        });
-        // Three buttons share a row, so a long label (e.g. pt-BR "Compartilhar") would wrap to a second
-        // line and make its button taller than the others. Keep each on one line and let it shrink to fit.
-        compactRowButton(share);
-        compactRowButton(copy);
-        compactRowButton(clear);
-        logActions.addView(share, equalWeightMargin(0, dp(6)));
-        logActions.addView(copy, equalWeightMargin(dp(6), dp(6)));
-        logActions.addView(clear, equalWeightMargin(dp(6), 0));
-        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        logOverlayHeading = title(strings.tabLog);
+        logOverlayHeading.setPadding(0, 0, 0, 0);
+        top.addView(logOverlayHeading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button close = outlinedButton(strings.close);
+        close.setLayoutParams(new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        close.setContentDescription(strings.close);
+        close.setOnClickListener(v -> showFullLog(false));
+        top.addView(close);
+        col.addView(top);
+
+        col.addView(buildLogActions());
+
+        TextView caption = body(strings.logTailCaption);
+        LinearLayout.LayoutParams capLp = new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        actionsLp.bottomMargin = dp(12);
-        col.addView(logActions, actionsLp);
+        capLp.topMargin = dp(10);
+        capLp.bottomMargin = dp(10);
+        col.addView(caption, capLp);
 
         logScroll = new ScrollView(this);
         GradientDrawable bg = new GradientDrawable();
@@ -349,27 +399,57 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         return col;
     }
 
-    private void showLogTab(boolean log) {
-        motorcycleContent.setVisibility(log ? View.GONE : View.VISIBLE);
-        logContent.setVisibility(log ? View.VISIBLE : View.GONE);
-        styleTab(motorcycleTab, !log);
-        styleTab(logTab, log);
-        if (log) {
+    private void showFullLog(boolean show) {
+        logContent.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (show) {
+            // The full view is only rendered while visible (appendLog skips it otherwise); render it now.
+            if (logView != null) {
+                logView.setText(logBuffer.toString());
+            }
             scrollLogToBottom();
+            if (logOverlayHeading != null) {
+                logOverlayHeading.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED);
+            }
         }
+    }
+
+    private void clearLogViews() {
+        bridge.clearLog();
+        logBuffer.setLength(0);
+        if (logView != null) {
+            logView.setText("");
+        }
+        if (miniLogView != null) {
+            miniLogView.setText("");
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (logContent != null && logContent.getVisibility() == View.VISIBLE) {
+            showFullLog(false);
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        // Seed the view with the full accumulated log (it keeps running while the screen is closed).
-        logBuffer.setLength(0);
-        logBuffer.append(bridge.getLog());
-        if (logView != null) {
-            logView.setText(logBuffer.toString());
-            scrollLogToBottom();
-        }
-        bridge.setUi(this);
+        bridge.setUi(this); // attach first so the live feed is running while the seed loads
+        // Seed from the on-disk store (a large recent tail, archives included). getLog() blocks on disk IO,
+        // so read it off the UI thread, then replace the buffer with it. Disk is the source of truth: a line
+        // logged in the brief window between the read and this apply may be dropped from the view, but it is
+        // on disk and reappears on the next open. logBuffer is only ever touched on the main thread.
+        new Thread(() -> {
+            final String seed = bridge.getLog();
+            runOnUiThread(() -> {
+                logBuffer.setLength(0);
+                logBuffer.append(seed);
+                trimBuffer();
+                refreshLogViews();
+            });
+        }, "wazeology-log-seed").start();
     }
 
     private void shareLog() {
@@ -397,9 +477,10 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
     }
 
     private void copyLog() {
+        // Copy the on-screen tail (what's in view); Share is the escape hatch for the full on-disk history.
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText(strings.shareSubject, bridge.getLog()));
+            cm.setPrimaryClip(ClipData.newPlainText(strings.shareSubject, logBuffer.toString()));
             appendLog("(log copied to clipboard)");
         }
     }
@@ -832,18 +913,42 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
 
     private void appendLog(String line) {
         logBuffer.append(line).append('\n');
-        if (logBuffer.length() > LOG_VIEW_MAX_CHARS) {
-            logBuffer.delete(0, logBuffer.length() - LOG_VIEW_MAX_CHARS);
-        }
-        if (logView != null) {
+        trimBuffer();
+        refreshLogViews();
+    }
+
+    /** Pushes the current buffer into both views. The full (overlay) view is only re-rendered while the
+     *  overlay is visible. During navigation the buffer changes several times a second, and setting a large
+     *  hidden TextView on every line is wasted work; showFullLog renders it on open. The mini card always
+     *  shows just its last few lines, cheap to update. */
+    private void refreshLogViews() {
+        if (logView != null && logContent != null && logContent.getVisibility() == View.VISIBLE) {
             logView.setText(logBuffer.toString());
             scrollLogToBottom();
+        }
+        if (miniLogView != null) {
+            int len = logBuffer.length();
+            int from = Math.max(0, len - MINI_VIEW_MAX_CHARS);
+            miniLogView.setText(logBuffer.substring(from));
+            scrollMiniToBottom();
+        }
+    }
+
+    private void trimBuffer() {
+        if (logBuffer.length() > LOG_VIEW_MAX_CHARS) {
+            logBuffer.delete(0, logBuffer.length() - LOG_VIEW_MAX_CHARS);
         }
     }
 
     private void scrollLogToBottom() {
         if (logScroll != null) {
             logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
+        }
+    }
+
+    private void scrollMiniToBottom() {
+        if (miniLogScroll != null) {
+            miniLogScroll.post(() -> miniLogScroll.fullScroll(View.FOCUS_DOWN));
         }
     }
 
@@ -990,39 +1095,12 @@ public final class WazeologyActivity extends Activity implements ClusterBridge.U
         return b;
     }
 
-    private TextView tabButton(String text) {
-        TextView t = new TextView(this);
-        t.setText(text);
-        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        t.setTypeface(Typeface.DEFAULT_BOLD);
-        t.setGravity(Gravity.CENTER);
-        t.setPadding(0, dp(12), 0, dp(12));
-        t.setMinHeight(dp(48));
-        t.setClickable(true);
-        t.setFocusable(true);
-        return t;
-    }
-
-    private void styleTab(TextView t, boolean selected) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(selected ? palette.primaryContainer : Color.TRANSPARENT);
-        bg.setCornerRadius(dp(18));
-        t.setBackground(rippled(withAlpha(palette.primary, 0x33), bg));
-        t.setTextColor(selected ? palette.onPrimaryContainer : palette.onSurfaceVariant);
-        t.setSelected(selected);
-        t.setContentDescription(t.getText() + (selected ? strings.selectedSuffix : ""));
-    }
-
     private Drawable rippled(int rippleColor, Drawable content) {
         return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, content);
     }
 
     private static int withAlpha(int color, int alpha) {
         return (color & 0x00FFFFFF) | (alpha << 24);
-    }
-
-    private LinearLayout.LayoutParams equalWeight() {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
     }
 
     private LinearLayout.LayoutParams equalWeightMargin(int left, int right) {

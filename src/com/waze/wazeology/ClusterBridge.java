@@ -20,7 +20,6 @@ import android.os.SystemClock;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -37,7 +36,7 @@ import java.util.UUID;
  */
 public final class ClusterBridge implements BleClient.Listener {
 
-    private static final int LOG_MAX_LINES = 2000;
+    private static final int DISPLAY_TAIL_LINES = 4000; // recent tail seeded into the on-screen view
 
     private static final long KEEPALIVE_MS = 5000L;
     private static final long MIN_SEND_INTERVAL_MS = 1000L;
@@ -85,8 +84,6 @@ public final class ClusterBridge implements BleClient.Listener {
     private Sent lastSent;
     private String status = NO_NAVIGATION;
 
-    private final ArrayDeque<String> logLines = new ArrayDeque<>();
-    private final SimpleDateFormat logClock = new SimpleDateFormat("HH:mm:ss", Locale.US);
     private final SimpleDateFormat logFileClock = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
     private final LogStore logStore;
 
@@ -112,10 +109,6 @@ public final class ClusterBridge implements BleClient.Listener {
         this.context = appCtx;
         this.ble = new BleClient(appCtx, this);
         this.logStore = new LogStore(new File(appCtx.getFilesDir(), "wazeology-logs"));
-        // Reload the tail of the persisted log so the screen isn't empty after the Waze process restarts.
-        for (String l : logStore.readActiveTail(LOG_MAX_LINES)) {
-            logLines.addLast(l);
-        }
         main.post(keepalive);
         // A saved, still-bonded motorcycle is waited for passively from the moment the process is up
         // (ensurePassive resolves it from prefs; see resolveTarget for why that is lazy).
@@ -668,14 +661,15 @@ public final class ClusterBridge implements BleClient.Listener {
         transmit(sent);
     }
 
-    /** Always logs the frame hex (dry-run visibility); only writes to the cluster when the link is READY. */
+    /** Sends the nav frame when the link is READY (BleClient then logs the actual {@code TX NAV} write);
+     *  when not ready, logs a compact dry-run marker here since nothing hits the wire. There is no hex
+     *  because the frame is fully determined by (flag, turn, unit, distance), already on the preceding cue
+     *  line. */
     private void transmit(Sent sent) {
-        byte[] frame = Frames.turnByTurn(sent.flag, sent.turn, sent.unit, sent.value);
-        boolean ready = ble.getState() == BleClient.State.READY;
-        String opTag = String.format(Locale.US, "TX 0x%02X ", Kawasaki.OP_TURN_BY_TURN);
-        log(opTag + (ready ? "" : "(dry-run) ") + Frames.hex(frame));
-        if (ready) {
+        if (ble.getState() == BleClient.State.READY) {
             ble.sendTurnByTurn(sent.label, sent.flag, sent.turn, sent.unit, sent.value);
+        } else {
+            log("TX NAV " + sent.turn.name() + " " + sent.value + " " + sent.unit.name() + " (dry-run)");
         }
     }
 
@@ -828,29 +822,22 @@ public final class ClusterBridge implements BleClient.Listener {
     }
 
     private void log(String line) {
-        Date now = new Date();
-        String stamped = logClock.format(now) + " " + line;
-        synchronized (logLines) {
-            logLines.addLast(stamped);
-            while (logLines.size() > LOG_MAX_LINES) {
-                logLines.removeFirst();
-            }
-        }
-        // Persist a date-stamped copy so the log survives the process and can be exported/rotated.
-        logStore.append(logFileClock.format(now) + " " + line);
+        // One source of truth: the same date-stamped line is persisted and shown on screen, so the on-screen
+        // view is a tail of exactly what Share exports (no second, smaller in-memory buffer to diverge).
+        String stamped = logFileClock.format(new Date()) + " " + line;
+        logStore.append(stamped);
         final Ui u = ui;
         if (u != null) {
             main.post(() -> u.onLog(stamped));
         }
     }
 
-    /** Full in-memory log (accumulated even while the screen is closed), for the on-screen export. */
+    /** A large recent tail of the on-disk log (archives included) for seeding the on-screen view. Blocking
+     *  (disk IO); call off the UI thread. Share still exports the full history via {@link #exportFullLog}. */
     public String getLog() {
         StringBuilder b = new StringBuilder();
-        synchronized (logLines) {
-            for (String l : logLines) {
-                b.append(l).append('\n');
-            }
+        for (String l : logStore.readCombinedTail(DISPLAY_TAIL_LINES)) {
+            b.append(l).append('\n');
         }
         return b.toString();
     }
@@ -865,9 +852,6 @@ public final class ClusterBridge implements BleClient.Listener {
     }
 
     public void clearLog() {
-        synchronized (logLines) {
-            logLines.clear();
-        }
         logStore.clear();
     }
 }

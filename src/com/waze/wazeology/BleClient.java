@@ -286,7 +286,16 @@ public final class BleClient {
             finishCurrent();
             return;
         }
-        log("TX " + command.label + ": " + Frames.hex(command.frame));
+        // Every control-point frame is statically known, so the log shows its stable FrameType code; a hex
+        // dump would only repeat constant bytes. The meter frame is constant apart from its battery nibble
+        // (byte 7 high nibble), which the log includes.
+        int txOp = command.frame.length > 0 ? command.frame[0] & 0xFF : -1;
+        if (txOp == Kawasaki.OP_METER_INDICATION) {
+            int batt = command.frame.length > 7 ? (command.frame[7] >> 4) & 0x0F : 0x0F;
+            log("TX METER batt=0x" + Integer.toHexString(batt).toUpperCase());
+        } else {
+            log("TX " + FrameType.label(txOp));
+        }
         boolean started;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             started = g.writeCharacteristic(characteristic, command.frame,
@@ -332,8 +341,22 @@ public final class BleClient {
     }
 
     private void onNotification(UUID uuid, byte[] value) {
-        String tag = uuid.toString();
-        log("RX[" + tag.substring(0, Math.min(4, tag.length())) + "] " + Frames.hex(value));
+        // ACKs are short and repeat constantly (one per write), so log which opcode they acknowledge as a
+        // code. Data responses (model / capabilities / settings) carry live payload and fire once per
+        // connection, so keep their hex; inspect() adds the parsed summary for the ones we decode.
+        int rxOp = value.length > 0 ? value[0] & 0xFF : -1;
+        if (rxOp == Kawasaki.OP_ACK) {
+            // Label the ACK by the opcode it echoes at value[3]; the phone-name ACK doesn't carry it there
+            // (see Frames.isResponseTo), so fall back to the in-flight command's expected opcode.
+            int echoed = value.length > 3 ? value[3] & 0xFF : -1;
+            Command awaiting = current;
+            String what = FrameType.of(echoed) != null ? FrameType.label(echoed)
+                : awaiting != null && awaiting.expects != null ? FrameType.label(awaiting.expects)
+                : echoed >= 0 ? FrameType.label(echoed) : null;
+            log(what != null ? "RX ACK -> " + what : "RX ACK");
+        } else {
+            log("RX " + FrameType.label(rxOp) + " " + Frames.hex(value));
+        }
         inspect(value);
         Command command = current;
         if (command == null || command.expects == null) {

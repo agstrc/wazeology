@@ -16,6 +16,7 @@ import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
@@ -121,17 +122,68 @@ final class LogStore {
     }
 
     /**
-     * Read back the tail of the active file (up to {@code maxLines}) so the visible log survives a process
-     * restart. Runs synchronously on the caller; the active file is bounded by {@link #ROTATE_BYTES}.
+     * Read back the last {@code maxLines} of the whole on-disk history (rotated archives included) in
+     * chronological order, so the on-screen view is a tail of the same log that {@link #exportCombined}
+     * writes. Reads the active file first and only decompresses archives newest-to-oldest until it has
+     * enough lines, so it never inflates the full {@link #MAX_ARCHIVE_BYTES} just for a tail. Runs on the IO
+     * thread (never races appends/rotation) and blocks the caller; call off the UI thread.
      */
-    List<String> readActiveTail(int maxLines) {
+    List<String> readCombinedTail(final int maxLines) {
+        Future<List<String>> f = io.submit(new Callable<List<String>>() {
+            @Override
+            public List<String> call() {
+                ArrayList<String> activeLines = readAllLines(active, false);
+                if (activeLines.size() >= maxLines) {
+                    return new ArrayList<>(activeLines.subList(activeLines.size() - maxLines, activeLines.size()));
+                }
+                int need = maxLines - activeLines.size();
+                File[] archives = listArchives();
+                // Oldest first (UTC names sort chronologically); walk newest to oldest for the tail.
+                Arrays.sort(archives, new Comparator<File>() {
+                    @Override
+                    public int compare(File a, File b) {
+                        return a.getName().compareTo(b.getName());
+                    }
+                });
+                ArrayList<String> older = new ArrayList<>(); // newest-first as collected
+                outer:
+                for (int i = archives.length - 1; i >= 0; i--) {
+                    ArrayList<String> lines = readAllLines(archives[i], true);
+                    for (int j = lines.size() - 1; j >= 0; j--) {
+                        older.add(lines.get(j));
+                        if (older.size() >= need) {
+                            break outer;
+                        }
+                    }
+                }
+                Collections.reverse(older); // back to chronological
+                ArrayList<String> result = new ArrayList<>(older.size() + activeLines.size());
+                result.addAll(older);
+                result.addAll(activeLines);
+                return result;
+            }
+        });
+        try {
+            List<String> r = f.get();
+            return r != null ? r : new ArrayList<String>();
+        } catch (Throwable ignored) {
+            return new ArrayList<>();
+        }
+    }
+
+    /** Read every line of a log file (optionally gzip-compressed). Returns an empty list on any error. */
+    private static ArrayList<String> readAllLines(File src, boolean gzipped) {
         ArrayList<String> lines = new ArrayList<>();
-        if (!active.isFile()) {
+        if (!src.isFile()) {
             return lines;
         }
         BufferedReader reader = null;
         try {
-            reader = new BufferedReader(new InputStreamReader(new FileInputStream(active), UTF8));
+            InputStream in = new FileInputStream(src);
+            if (gzipped) {
+                in = new GZIPInputStream(in);
+            }
+            reader = new BufferedReader(new InputStreamReader(in, UTF8));
             String line;
             while ((line = reader.readLine()) != null) {
                 lines.add(line);
@@ -139,9 +191,6 @@ final class LogStore {
         } catch (Throwable ignored) {
         } finally {
             closeQuietly(reader);
-        }
-        if (lines.size() > maxLines) {
-            return new ArrayList<>(lines.subList(lines.size() - maxLines, lines.size()));
         }
         return lines;
     }
@@ -206,7 +255,7 @@ final class LogStore {
         }
     }
 
-    /** Append the plaintext active file into {@code out} (mirrors readActiveTail's read pattern). */
+    /** Append the plaintext active file into {@code out}. */
     private static void copyPlain(File src, Writer out) {
         if (!src.isFile()) {
             return;

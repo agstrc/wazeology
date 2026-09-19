@@ -18,22 +18,23 @@ final class Strings {
     /** True when the device is set to Português (Brasil). */
     final boolean pt;
 
-    // Tabs
-    final String tabMotorcycle;
-    final String tabLog;
-
     // Card titles
     final String connection;
     final String devices;
+    final String activity;   // compact log card heading
+    final String tabLog;     // full-log overlay heading
 
     // Connection-card buttons
     final String scanForMotorcycle;
     final String forget;
 
-    // Log-tab buttons
+    // Log buttons
     final String share;
     final String copy;
     final String clear;
+    final String viewFullLog; // opens the full-log overlay
+    final String close;       // closes the full-log overlay
+    final String logTailCaption; // explains on-screen tail vs. full Share export
 
     // Passkey banner
     final String passkeyTitle;
@@ -69,7 +70,6 @@ final class Strings {
     final String unnamed;             // device with no advertised name
     final String motorcycleFallback;  // targetName() noun when no label is known
     final String cuePrefix;           // "Cue: " before the live Waze cue
-    final String selectedSuffix;      // ", selected" appended to a selected tab's description
     final String connectToPrefix;     // "Connect to " before a device name (row description)
 
     // Share-sheet chrome
@@ -80,15 +80,18 @@ final class Strings {
         Locale loc = localeOf(context);
         this.pt = "pt".equals(loc.getLanguage()) && "BR".equalsIgnoreCase(loc.getCountry());
         if (pt) {
-            tabMotorcycle      = "Moto";
-            tabLog             = "Registro";
             connection         = "Conexão";
             devices            = "Dispositivos";
-            scanForMotorcycle  = "Buscar motocicleta";
+            activity           = "Atividade";
+            tabLog             = "Registro";
+            scanForMotorcycle  = "Buscar moto";
             forget             = "Esquecer";
             share              = "Compartilhar";
             copy               = "Copiar";
             clear              = "Limpar";
+            viewFullLog        = "Ver tudo";
+            close              = "Fechar";
+            logTailCaption     = "Mostrando a atividade recente. Use Compartilhar para o registro completo.";
             passkeyTitle       = "Confirmar pareamento";
             passkeyBody        = "Confira se o código do painel é igual ao do telefone e confirme nos dois aparelhos.";
             unsupportedTitle   = "Este painel não mostra navegação";
@@ -106,26 +109,28 @@ final class Strings {
             disconnect         = "Desconectar";
             connectNow         = "Conectar agora";
             connect            = "Conectar";
-            searchingDevices   = "Buscando sua motocicleta…";
-            noMotorcycleFound  = "Nenhuma motocicleta encontrada. Confira se o painel está ligado e busque de novo.";
+            searchingDevices   = "Buscando sua moto…";
+            noMotorcycleFound  = "Nenhuma moto encontrada. Confira se o painel está ligado e busque de novo.";
             noDevicesYet       = "(nenhum dispositivo ainda: toque em Buscar)";
             unnamed            = "(sem nome)";
-            motorcycleFallback = "motocicleta";
+            motorcycleFallback = "moto";
             cuePrefix          = "Instrução: ";
-            selectedSuffix     = ", aba selecionada";
             connectToPrefix    = "Conectar a ";
-            shareSubject       = "Registro da motocicleta Kawasaki";
-            shareChooser       = "Compartilhar registro da motocicleta";
+            shareSubject       = "Registro da moto Kawasaki";
+            shareChooser       = "Compartilhar registro da moto";
         } else {
-            tabMotorcycle      = "Motorcycle";
-            tabLog             = "Log";
             connection         = "Connection";
             devices            = "Devices";
+            activity           = "Activity";
+            tabLog             = "Log";
             scanForMotorcycle  = "Scan for motorcycle";
             forget             = "Forget";
             share              = "Share";
             copy               = "Copy";
             clear              = "Clear";
+            viewFullLog        = "View full log";
+            close              = "Close";
+            logTailCaption     = "Showing recent activity. Use Share for the full log.";
             passkeyTitle       = "Confirm pairing";
             passkeyBody        = "Check the passkey on your cluster matches the phone's, then confirm on both.";
             unsupportedTitle   = "This cluster can't show navigation";
@@ -149,7 +154,6 @@ final class Strings {
             unnamed            = "(unnamed)";
             motorcycleFallback = "motorcycle";
             cuePrefix          = "Cue: ";
-            selectedSuffix     = ", selected";
             connectToPrefix    = "Connect to ";
             shareSubject       = "Kawasaki motorcycle log";
             shareChooser       = "Share motorcycle log";
