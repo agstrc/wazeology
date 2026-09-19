@@ -5,8 +5,9 @@ The golden rule's real hazard is aapt2 RE-ENCODING resource XML, not a modified 
 APKEditor's binary merge rebuilds the resource TABLE but copies every res/* FILE verbatim. This gate
 asserts exactly that: in the final bundled apk, no pristine-base res/* file has changed except the ones
 the graft itself intentionally patched (the launcher icon), and the only dropped entry is the obsolete
-split descriptor. It also checks the native .so are STORED (extractNativeLibs=false) and the patched dex
-survived. Exit non-zero on any violation so scripts/build.sh fails loudly.
+split descriptor. It also checks the native .so are STORED (extractNativeLibs=false) and that every dex in
+the grafted base survived (patched hook dexes, the package dex, and the pristine passthroughs alike). Exit
+non-zero on any violation so scripts/build.sh fails loudly.
 
 Args: <pristine base.apk> <grafted build/gen/base.apk> <final ./wazeology.apk>
 """
@@ -40,7 +41,10 @@ def main():
 
     so = [i for i in final.infolist() if i.filename.startswith("lib/") and i.filename.endswith(".so")]
     compressed_so = [i.filename for i in so if i.compress_type != 0]
-    missing_dex = [d for d in ("classes6.dex", "classes11.dex") if d not in fn]
+    # Every dex in the grafted base (patched hook dexes, the package dex, and the pristine passthroughs)
+    # must survive the APKEditor merge; a dropped one silently loses whatever it carried.
+    base_dexes = {n for n in gn if n.endswith(".dex")}
+    missing_dex = sorted(d for d in base_dexes if d not in fn)
 
     ok = True
     if bad_changed:

@@ -35,8 +35,8 @@ d8 --min-api 32 --output build/gen/dexout $(find build/gen/cls -name "*.class")
 mv build/gen/dexout/classes.dex build/gen/pkg.dex
 '
 
-# 3. Reassemble the decompiled tree (gives us the binary manifest + patched classes6.dex).
-log "apktool b (for binary manifest + patched classes6.dex)"
+# 3. Reassemble the decompiled tree (gives us the binary manifest + every patched dex).
+log "apktool b (for binary manifest + patched dexes)"
 run_tools apktool b "build/base_apktool" -o "build/gen/apktool_out.apk"
 
 # 3b. Compile the self-contained Wazeology launcher icon (adaptive) to binary XML, and resolve the
@@ -75,11 +75,30 @@ ICON_TARGET="$(cat build/gen/icon/target_path.txt)"
 
 # 4. Graft onto the pristine base.apk (resources.arsc stays byte-identical; --res-sub only overwrites
 #    the CONTENT of the existing orphan icon entry).
+# The graft ships the pristine dexes verbatim and swaps in ONLY the patched hook dexes (the ones whose
+# smali a hook touched). Derive that set from the injected hook markers so a hook added to any dex is
+# picked up automatically: the four nav hooks land in classes6, the FreeMapAppActivity startup hook in
+# classes5. Missing one here is the trap that once left the startup hook in an un-swapped
+# classes5.dex: the pristine one shipped instead, so init() never ran.
+REBUILT_DEX_ARGS=()
+while read -r sd; do
+    case "$sd" in
+        smali)          REBUILT_DEX_ARGS+=(--rebuilt-dex "classes.dex") ;;
+        smali_classes*) REBUILT_DEX_ARGS+=(--rebuilt-dex "classes${sd#smali_classes}.dex") ;;
+    esac
+done < <(grep -rl "Lcom/waze/debug/InstructionReporter;->" "$DECOMP_DIR"/smali*/ \
+    | sed -E 's#.*/(smali(_classes[0-9]+)?)/.*#\1#' | sort -u)
+if [ "${#REBUILT_DEX_ARGS[@]}" -eq 0 ]; then
+    echo "FATAL: no injected hook markers found in $DECOMP_DIR: patches not applied?" >&2
+    exit 1
+fi
+
 log "grafting onto pristine base.apk"
 run_tools python3 scripts/graft.py \
     --pristine "apk/base.apk" \
     --apktool "build/gen/apktool_out.apk" \
     --pkgdex "build/gen/pkg.dex" \
+    "${REBUILT_DEX_ARGS[@]}" \
     --res-sub "$ICON_TARGET=build/gen/icon/compiled.xml" \
     --out "build/gen/base.apk"
 

@@ -100,8 +100,11 @@ apktool's rebuilt resources (see §3). `apktool.yml` records `minSdk 32`, `targe
 127` — needed so apktool reassembles with the original resource IDs.
 
 Note `smali_classesN/` ↔ `classesN.dex` is 1:1: the classes that were in `classes6.dex` baksmali into
-`smali_classes6/`, and rebuild back into `classes6.dex`. This is why we can graft a single rebuilt
-`classes6.dex` back onto the pristine APK (§7).
+`smali_classes6/`, and rebuild back into `classes6.dex`. This is why we can graft individual reassembled
+dexes back onto the pristine APK (§7). A hook lands in whichever dex holds its target class: the nav hooks
+live in `NavigationInfoNativeManager` → `classes6.dex`, the `FreeMapAppActivity` startup hook in
+`classes5.dex`. The graft must swap in **every patched hook dex**. `build.sh` derives that set from the
+injected hook markers, so a hook added to a new dex is never silently dropped.
 
 ---
 
@@ -154,7 +157,8 @@ Smali details that matter:
 - **Enum name resolution.** `Instruction$Type` extends `java.lang.Enum`, so `invoke-virtual … Enum;->name()`
   yields readable names (`TURN_LEFT`, `KEEP_LEFT`, `ROUNDABOUT_EXIT_LEFT`, …). We map by **name**, not by
   the proto's numeric id, so the mapping is robust to proto-number churn.
-- The reassembled `smali_classes6/` becomes `classes6.dex`, which the graft (§7) swaps in.
+- The reassembled `smali_classes6/` becomes `classes6.dex` (nav hooks) and `smali_classes5/` becomes
+  `classes5.dex` (the `FreeMapAppActivity` startup hook); the graft (§7) swaps in each.
 
 `InstructionReporter` (in `src/com/waze/debug/`) is the tiny bridge the hooks call; it forwards to the
 process-wide `ClusterBridge` singleton and swallows every exception so instrumentation can never crash Waze.
@@ -236,15 +240,18 @@ regression in the frame builders without hardware.
 
 ## 7. Assemble — graft onto the pristine base — `scripts/graft.py`
 
-`apktool b build/base_apktool` produces an APK we use **only** as a source of two entries: the rebuilt binary
-`AndroidManifest.xml` (with our activity) and the patched `classes6.dex` (with our hooks). Its rebuilt
-resources are **discarded**.
+`apktool b build/base_apktool` produces an APK we use **only** as a source of code+manifest entries: the
+rebuilt binary `AndroidManifest.xml` (with our activity) and each **patched hook dex** (with our hooks).
+Its rebuilt resources are **discarded**.
 
 `graft.py` then rewrites a copy of the **pristine `apk/base.apk`**, entry by entry, preserving each entry's
 compression, and:
 
 - replaces `AndroidManifest.xml` with the rebuilt binary manifest,
-- replaces `classes6.dex` with the rebuilt one (stored uncompressed),
+- replaces each `--rebuilt-dex classesN.dex` with the reassembled one (stored uncompressed), one per
+  patched hook dex (`classes5.dex` for the startup hook, `classes6.dex` for the nav hooks); `build.sh`
+  derives the set from the injected hook markers, so a hook added to a new dex is swapped in automatically
+  instead of being silently lost,
 - appends the Wazeology dex as the **next contiguous** `classesN.dex` (currently `classes11.dex`) stored
   uncompressed — ART loads every `classesN.dex` from the base APK, so no code references it explicitly; it
   just needs to exist and be contiguous (`classes.dex, classes2 … classesN`, no gaps),
@@ -329,8 +336,8 @@ the base and the native libs.
 pristine `apk/base.apk` and fails unless the only changed entries are the ones the graft intentionally patched
 (the launcher icon, §5.1) and the only dropped entry is `res/xml/splits0.xml`. That check confirms the merge
 rebuilt the resource table while leaving every resource file verbatim. It also asserts the native `.so` are
-STORED (uncompressed, required by `extractNativeLibs=false`) and that `classes6.dex` (hooks) and the Wazeology
-dex survived.
+STORED (uncompressed, required by `extractNativeLibs=false`) and that every dex in the grafted base (patched
+hook dexes, the package dex, and the pristine passthroughs) survived the merge.
 
 The bundled apk is statically verified: structure, signature, and the resource gate above. It has not been
 re-validated end to end on the cluster, so do a bike pass (§9) before trusting it in the field.

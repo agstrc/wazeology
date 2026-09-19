@@ -3,8 +3,11 @@
 
 Takes the pristine base.apk and swaps in ONLY:
   - AndroidManifest.xml  (rebuilt binary, from the apktool build — carries the new <activity>)
-  - classes6.dex         (rebuilt, from the apktool build — carries the smali hooks)
-  - a new contiguous classesN.dex holding the Wazeology package (com.waze.wazeology + com.waze.debug)
+  - one or more patched hook dexes: the classesN.dex the apktool build reassembled because a hook
+    touched their smali (--rebuilt-dex, repeatable). The nav hooks land in classes6.dex, the
+    FreeMapAppActivity startup hook in classes5.dex; each MUST be swapped or its hook silently vanishes.
+  - the package dex: a new contiguous classesN.dex holding the Wazeology package (com.waze.wazeology +
+    com.waze.debug), freshly compiled from src/ (not reassembled by apktool)
   - zero or more --res-sub overwrites: the BYTES of an already-existing res/* file are replaced in
     place (same zip path), so resources.arsc still resolves the same id -> same path. Used to give
     Wazeology its launcher icon by overwriting the ORPHAN mipmap/launch_icon_round with a compiled,
@@ -46,6 +49,9 @@ def main():
     ap.add_argument("--apktool", required=True)
     ap.add_argument("--pkgdex", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--rebuilt-dex", action="append", default=[], required=True, metavar="NAME",
+                    help="a patched hook dex: a classesN.dex to take from the apktool build instead of the "
+                         "pristine base (every dex whose smali a hook touched); may repeat")
     ap.add_argument("--res-sub", action="append", default=[], metavar="ZIPPATH=FILE",
                     help="overwrite the bytes of an existing res/* entry (may repeat)")
     a = ap.parse_args()
@@ -60,8 +66,14 @@ def main():
             res_sub[zippath] = f.read()
 
     with zipfile.ZipFile(a.apktool) as z:
+        apktool_names = set(z.namelist())
         manifest = z.read("AndroidManifest.xml")
-        classes6 = z.read("classes6.dex")
+        rebuilt = {}
+        for d in a.rebuilt_dex:
+            if d not in apktool_names:
+                print("FATAL: --rebuilt-dex not in apktool build: " + d, file=sys.stderr)
+                return 1
+            rebuilt[d] = z.read(d)
     with open(a.pkgdex, "rb") as f:
         pkgdex = f.read()
 
@@ -77,11 +89,11 @@ def main():
                     zi.compress_type = item.compress_type
                     zi.external_attr = item.external_attr
                     zout.writestr(zi, manifest)
-                elif item.filename == "classes6.dex":
-                    zi = zipfile.ZipInfo("classes6.dex", date_time=item.date_time)
+                elif item.filename in rebuilt:
+                    zi = zipfile.ZipInfo(item.filename, date_time=item.date_time)
                     zi.compress_type = zipfile.ZIP_STORED
                     zi.external_attr = item.external_attr
-                    zout.writestr(zi, classes6)
+                    zout.writestr(zi, rebuilt.pop(item.filename))
                 elif item.filename in res_sub:
                     zi = zipfile.ZipInfo(item.filename, date_time=item.date_time)
                     zi.compress_type = item.compress_type
@@ -104,11 +116,16 @@ def main():
         print("FATAL: --res-sub path(s) not found in pristine apk: "
               + ", ".join(sorted(res_sub)), file=sys.stderr)
         return 1
+    if rebuilt:
+        print("FATAL: --rebuilt-dex path(s) not found in pristine apk: "
+              + ", ".join(sorted(rebuilt)), file=sys.stderr)
+        return 1
 
     if sha(a.pristine, "resources.arsc") != sha(a.out, "resources.arsc"):
         print("FATAL: resources.arsc changed — graft is not resource-pristine", file=sys.stderr)
         return 1
-    print("grafted -> {} (package dex = {}, resources.arsc byte-identical)".format(a.out, dexname))
+    print("grafted -> {} (patched hook dexes = {}, package dex = {}, resources.arsc byte-identical)"
+          .format(a.out, ",".join(sorted(a.rebuilt_dex)), dexname))
     return 0
 
 
