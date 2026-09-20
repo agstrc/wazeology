@@ -21,6 +21,7 @@ antes, fora a ligação extra com o painel.
 
 - [Segurança](#segurança)
 - [Contexto](#contexto)
+- [Compatibilidade](#compatibilidade)
 - [Instalação](#instalação)
   - [Dependências](#dependências)
 - [Uso](#uso)
@@ -43,18 +44,32 @@ Este é um projeto educacional de engenharia reversa, para os seus próprios apa
 orientações de navegação do Waze até o painel TFT de fábrica de uma moto, o mesmo display em que o app
 Rideology, da própria Kawasaki, escreve. Você entra com a sua cópia do Waze e com o seu hardware.
 
-O protocolo BLE do painel da Kawasaki usado aqui foi obtido por engenharia reversa de forma independente e
-testado em hardware real, uma Kawasaki Z900 SE. Como a conexão fala o mesmo protocolo BLE do Rideology, ele
-deveria funcionar em qualquer Kawasaki compatível com o Rideology, mas a Z900 SE é a única confirmada até
-agora. Outros modelos e anos-modelo não foram testados. Veja o [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês)
-para a unidade exata testada e as ressalvas de mercado e ano-modelo.
-
 ### Veja também
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) cobre todo o mecanismo de decompilação, patch, enxerto
   (graft) e empacotamento, além da referência do protocolo BLE5 da Kawasaki.
 - [`CLAUDE.md`](CLAUDE.md) reúne as regras de trabalho deste repositório, incluindo a regra de ouro de nunca
   deixar o apktool reconstruir os recursos.
+
+## Compatibilidade
+
+O protocolo BLE do painel da Kawasaki usado aqui foi obtido por engenharia reversa de forma independente e
+testado em hardware real, uma Kawasaki Z900 SE. A ligação fala o mesmo protocolo BLE do Rideology, então se
+conecta a qualquer painel Kawasaki compatível com o Rideology. Só estes modelos, porém, conseguem exibir a
+navegação no painel:
+
+| Modelo       | Ano-modelo |
+| ------------ | ---------- |
+| Ninja ZX-10R | 2026 -     |
+| Z1100        | 2026 -     |
+| Z900         | 2025 -     |
+| Z900 (70kW)  | 2025 -     |
+
+Mesmo entre esses, só a Z900 SE foi testada; os demais devem funcionar, mas seguem sem teste. Veja o
+[`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) para a unidade exata testada e as ressalvas de mercado e
+ano-modelo.
+
+Fonte: [Kawasaki](https://www.global-kawasaki-motors.com/kawasaki_connect/en/mc.html).
 
 ## Instalação
 

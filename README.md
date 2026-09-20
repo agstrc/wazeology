@@ -20,6 +20,7 @@ to the cluster.
 
 - [Security](#security)
 - [Background](#background)
+- [Compatibility](#compatibility)
 - [Install](#install)
   - [Dependencies](#dependencies)
 - [Usage](#usage)
@@ -42,18 +43,30 @@ This is an educational reverse-engineering project for your own devices. The ide
 guidance onto a motorcycle's factory TFT cluster, the same display Kawasaki's own Rideology app writes to. You
 bring your own copy of Waze and your own hardware.
 
-The Kawasaki BLE cluster protocol used here was reverse-engineered independently and tested on real hardware, a
-Kawasaki Z900 SE. Since the link speaks the same BLE protocol as Rideology, it should work on any
-Rideology-compatible Kawasaki, but the Z900 SE is the only one confirmed so far. Other models and model years
-are untested. See [`DEVELOPMENT.md`](DEVELOPMENT.md) for the exact test unit and the market and model-year
-caveats.
-
 ### See Also
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) covers the full decompile, patch, graft, and bundling mechanism, along
   with the Kawasaki BLE5 protocol reference.
 - [`CLAUDE.md`](CLAUDE.md) holds the working rules for this repo, including the golden rule about never
   letting apktool rebuild resources.
+
+## Compatibility
+
+The Kawasaki BLE cluster protocol used here was reverse-engineered independently and tested on real hardware, a
+Kawasaki Z900 SE. The link speaks the same BLE protocol as Rideology, so it connects to any Rideology-compatible
+Kawasaki cluster. Only these models can show turn-by-turn navigation on the dash, though:
+
+| Model        | Model year |
+| ------------ | ---------- |
+| Ninja ZX-10R | 2026 -     |
+| Z1100        | 2026 -     |
+| Z900         | 2025 -     |
+| Z900 (70kW)  | 2025 -     |
+
+Even among those, only the Z900 SE has been tested; the rest are expected to work but remain untested. See
+[`DEVELOPMENT.md`](DEVELOPMENT.md) for the exact test unit and the market and model-year caveats.
+
+Source: [Kawasaki](https://www.global-kawasaki-motors.com/kawasaki_connect/en/mc.html).
 
 ## Install
 

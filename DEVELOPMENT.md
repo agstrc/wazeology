@@ -349,7 +349,16 @@ notify characteristics, MTU 300, bond-before-CCCD, the init sequence, `0x14` nav
 frames, and `0x20` ACK. It has been validated on a real cluster: a Kawasaki Z900 SE, sold as the "R Edition"
 in Brazil, model year 2026. Model-year naming varies by market; in some places, Brazil among them, the model
 year runs ahead of the calendar year, so this "2026" unit was the current bike back in 2025. A clean pair,
-init, and `0x14` navigation frames render on the cluster, and the maneuver→icon mapping works. Since the link
-speaks the same BLE protocol as Kawasaki's Rideology app, it should generally work on any Rideology-compatible
-Kawasaki. The Z900 SE is the only one confirmed, though; other models and years are expected to work but
-remain untested.
+init, and `0x14` navigation frames render on the cluster, and the maneuver→icon mapping works. The link
+speaks the same BLE protocol as Kawasaki's Rideology app, so it connects to any Rideology-compatible Kawasaki
+cluster. Only these models can display turn-by-turn navigation on the dash, though:
+
+| Model        | Model year |
+| ------------ | ---------- |
+| Ninja ZX-10R | 2026 -     |
+| Z1100        | 2026 -     |
+| Z900         | 2025 -     |
+| Z900 (70kW)  | 2025 -     |
+
+Even among those, the Z900 SE is the only one confirmed; the rest are expected to work but remain untested.
+Source: https://www.global-kawasaki-motors.com/kawasaki_connect/en/mc.html
