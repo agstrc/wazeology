@@ -17,6 +17,7 @@ antes.
 
 - [A minha moto é compatível?](#a-minha-moto-é-compatível)
 - [O que você precisa](#o-que-você-precisa)
+- [Por que um instalador?](#por-que-um-instalador)
 - [Instalação](#instalação)
 - [Se algo der errado](#se-algo-der-errado)
 - [Atualizar e remover](#atualizar-e-remover)
@@ -48,6 +49,13 @@ experimentou ainda. Fonte: [Kawasaki](https://www.global-kawasaki-motors.com/kaw
 - Uma das motos da lista acima.
 
 Não precisa de computador: tudo acontece no celular.
+
+## Por que um instalador?
+
+O Waze é um app do Google, e não é permitido distribuir uma cópia modificada dele. Por isso, este projeto
+não pode publicar um Waze com Wazeology pronto para você baixar. Em vez disso, o Wazeology Installer baixa
+o Waze normal do APKPure no seu celular e adiciona o Wazeology a essa cópia, ali mesmo. O Installer traz as
+mudanças do Wazeology, e não o app do Waze.
 
 ## Instalação
 

@@ -16,6 +16,7 @@ phone in your pocket. Waze itself looks and works exactly as before.
 
 - [Is my motorcycle supported?](#is-my-motorcycle-supported)
 - [What you need](#what-you-need)
+- [Why an installer?](#why-an-installer)
 - [Install](#install)
 - [If something goes wrong](#if-something-goes-wrong)
 - [Updating and removing](#updating-and-removing)
@@ -46,6 +47,13 @@ tried them yet. Source: [Kawasaki](https://www.global-kawasaki-motors.com/kawasa
 - One of the motorcycles above.
 
 You don't need a computer; everything happens on the phone.
+
+## Why an installer?
+
+Waze is Google's app, and sharing a modified copy of it isn't allowed, so this project can't publish a
+ready-made Waze with Wazeology for you to download. Instead, the Wazeology Installer downloads the regular
+Waze from APKPure onto your phone and adds Wazeology to that copy, right there. The Installer carries the
+Wazeology changes, not the Waze app itself.
 
 ## Install
 
