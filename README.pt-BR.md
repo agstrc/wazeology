@@ -4,59 +4,32 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
 
-Aplique um patch no app do Waze para Android para controlar, via BLE, um painel de instrumentos TFT BLE5 da
-Kawasaki compatível com o Rideology.
-
-O patch injeta um pequeno pacote (`com.waze.wazeology`) que lê as orientações de navegação em tempo real de
-dentro do próprio Waze e envia frames de navegação Kawasaki `0x14` para o painel. Ele também adiciona uma tela
-de gerenciamento, a **"Wazeology"**, um segundo ícone de app, onde você busca, pareia, conecta e lê o log. A
-build muda só o código e mantém todas as telas do Waze intactas, então o app se comporta exatamente como
-antes, fora a ligação extra com o painel.
+Veja a próxima curva do Waze no painel da sua Kawasaki. O Wazeology acrescenta uma pequena peça ao app do
+Waze que envia cada curva, por Bluetooth, para um painel TFT da Kawasaki compatível com o Rideology. Assim
+você pilota olhando o painel, com o celular no bolso. O Waze continua com a mesma cara e funciona como
+antes.
 
 ![A próxima curva do Waze espelhada em um painel TFT da Kawasaki: uma conversão à direita em 30 m mostrada no painel, ao lado da mesma indicação no celular](docs/example-cluster.jpg)
 
-*A próxima curva aparece no painel, então dá para dispensar o suporte de celular: você pilota guiando só pelo painel, ou pareia um intercomunicador para ouvir as instruções por voz também, com o celular travado no bolso.*
+*A próxima curva aparece no painel, então dá para dispensar o suporte de celular e pilotar só pelo painel, ou parear um intercomunicador para ouvir também as instruções por voz, com o celular travado no bolso.*
 
 ## Sumário
 
-- [Segurança](#segurança)
-- [Contexto](#contexto)
-- [Compatibilidade](#compatibilidade)
+- [A minha moto é compatível?](#a-minha-moto-é-compatível)
+- [O que você precisa](#o-que-você-precisa)
 - [Instalação](#instalação)
-  - [Dependências](#dependências)
-- [Uso](#uso)
+- [Se algo der errado](#se-algo-der-errado)
+- [Atualizar e remover](#atualizar-e-remover)
+- [Outras formas de instalar](#outras-formas-de-instalar)
+- [Segurança](#segurança)
 - [Aviso legal](#aviso-legal)
 - [Licença](#licença)
 
-## Segurança
+## A minha moto é compatível?
 
-Este projeto controla o painel de instrumentos de um veículo. Teste tudo com a moto parada antes de confiar
-nele em movimento. O `scripts/framecheck.sh` confere o layout dos bytes dos frames sem precisar de hardware, e
-o **Log** no aparelho mostra cada indicação com o hex bruto. Quando já estiver pilotando com ele, trate-o como
-qualquer outro instrumento do painel e mantenha os olhos na estrada.
-
-Modificar o Waze provavelmente viola os Termos de Serviço dele. Esse risco é seu, no seu aparelho e na sua
-conta, e nada aqui isenta você disso. Use por sua conta e risco.
-
-## Contexto
-
-Este é um projeto educacional de engenharia reversa, para os seus próprios aparelhos. A ideia é levar as
-orientações de navegação do Waze até o painel TFT de fábrica de uma moto, o mesmo display em que o app
-Rideology, da própria Kawasaki, escreve. Você entra com a sua cópia do Waze e com o seu hardware.
-
-### Veja também
-
-- [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) cobre todo o mecanismo de decompilação, patch, enxerto
-  (graft) e empacotamento, além da referência do protocolo BLE5 da Kawasaki.
-- [`CLAUDE.md`](CLAUDE.md) reúne as regras de trabalho deste repositório, incluindo a regra de ouro de nunca
-  deixar o apktool reconstruir os recursos.
-
-## Compatibilidade
-
-O protocolo BLE do painel da Kawasaki usado aqui foi obtido por engenharia reversa de forma independente e
-testado em hardware real, uma Kawasaki Z900 SE. A ligação fala o mesmo protocolo BLE do Rideology, então se
-conecta a qualquer painel Kawasaki compatível com o Rideology. Só estes modelos, porém, conseguem exibir a
-navegação no painel:
+O Wazeology conversa com o painel do mesmo jeito que o app Rideology, da Kawasaki, então ele se conecta a
+qualquer Kawasaki compatível com o Rideology. Mas só estes modelos conseguem mostrar a navegação curva a
+curva no painel:
 
 | Modelo       | Ano-modelo |
 | ------------ | ---------- |
@@ -65,91 +38,111 @@ navegação no painel:
 | Z900         | 2025 -     |
 | Z900 (70kW)  | 2025 -     |
 
-Mesmo entre esses, só a Z900 SE foi testada; os demais devem funcionar, mas seguem sem teste. Veja o
-[`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) para a unidade exata testada e as ressalvas de mercado e
-ano-modelo.
+Até agora ele só foi testado em uma Z900 SE. Os outros modelos devem funcionar do mesmo jeito, mas ninguém
+experimentou ainda. Fonte: [Kawasaki](https://www.global-kawasaki-motors.com/kawasaki_connect/en/mc.html).
 
-Fonte: [Kawasaki](https://www.global-kawasaki-motors.com/kawasaki_connect/en/mc.html).
+## O que você precisa
+
+- Um celular Android com Android 12L ou mais novo. Não funciona em iPhone.
+- Cerca de 400 MB livres e, de preferência, Wi-Fi: a instalação baixa o Waze uma vez (cerca de 181 MB).
+- Uma das motos da lista acima.
+
+Não precisa de computador: tudo acontece no celular.
 
 ## Instalação
 
-O wazeology é compilado inteiramente pelos scripts em `scripts/`, e a instalação no aparelho é manual. A única
-coisa que você instala na máquina é o Docker; toda a toolchain do Android roda dentro de uma imagem com
-versões fixadas.
+A maior parte do tempo vai no download do Waze.
 
-```bash
-cp .env.example .env       # opcional: define a fonte de download, os idiomas, etc.
-scripts/build-image.sh     # uma vez: monta a imagem da toolchain fixada (~1,5 GB na primeira vez)
-scripts/fetch-apk.sh       # baixa o Waze 5.23.0.2 fixado (apkeep -> apk/, no gitignore)
-```
+1. Baixe o Wazeology Installer. No celular, abra a
+   [versão mais recente](https://github.com/agstrc/wazeology/releases/latest) e baixe o
+   `wazeology-installer.apk`. Abra o arquivo baixado. O Android pergunta se o seu navegador (ou o app de
+   arquivos) pode instalar apps: permita, volte e toque em **Instalar**.
 
-### Dependências
+2. Abra o **Wazeology Installer**. Esta é a tela que você vai ver:
 
-- O Docker é a única dependência da máquina. apktool, as build-tools do Android, apkeep e a JDK rodam
-  todos dentro da imagem da toolchain fixada que o `scripts/build-image.sh` monta.
-- Um aparelho Android para instalar o apk compilado, fazendo o sideload do `./wazeology.apk` nele.
+   <img src="docs/installer.pt-BR.png" alt="A primeira tela do Wazeology Installer: o botão Preparar o Waze com Wazeology e, abaixo, a etapa de instalação" width="300">
 
-Algumas observações sobre entradas e reprodutibilidade:
+3. Remova o Waze que você já tem, se tiver. Se o cartão **Waze neste celular** disser que o Waze está
+   instalado e oferecer **Remover o Waze atual**, toque nele e confirme. O Android só permite um Waze por
+   celular, e o Waze da Play Store não pode ser substituído direto. Seus lugares salvos e seu histórico
+   voltam quando você entrar de novo na sua conta do Waze.
 
-- APKs e keystores nunca vão para o repositório. O `fetch-apk.sh` baixa a versão fixada do Waze, e a keystore
-  de debug é gerada localmente na primeira vez que você compila.
-- Por padrão, o download vem do apk-pure, que não exige credenciais. Você pode trocar para o google-play pelo
-  `.env` e obter uma cópia idêntica byte a byte; essa fonte exige um e-mail de conta e um token AAS, e o
-  `.env.example` mostra como configurar.
-- As versões são fixadas para garantir reprodutibilidade: Waze 5.23.0.2, apktool 2.10.0, build-tools 34.0.0,
-  android-34, apkeep 1.0.0.
+4. Toque em **Preparar o Waze com Wazeology**. O Installer baixa o Waze, confere o download e adiciona o
+   Wazeology a ele. Uma barra de progresso e uma notificação mostram quanto falta. Enquanto isso, você pode
+   desligar a tela ou usar outros apps. Se a conexão cair, o download continua sozinho quando a internet
+   voltar.
 
-## Uso
+5. Toque em **Instalar o Waze com Wazeology** e confirme na janela que o Android mostrar.
+   - Na primeira vez, o Android pede para permitir instalações pelo Wazeology Installer. Ative e volte; a
+     instalação continua sozinha.
+   - Se o Play Protect avisar sobre um app desconhecido, toque em **Mais detalhes** e depois em
+     **Instalar mesmo assim**.
+   - Em celulares Samsung, desligue antes o Bloqueador automático (Configurações > Segurança e privacidade >
+     Bloqueador automático).
 
-Compile de uma vez só:
+6. Pareie a sua moto. Agora você tem dois ícones: Waze e Wazeology. Abra o **Wazeology**, toque em
+   **Buscar moto**, escolha a sua e confirme o pareamento no painel. Depois inicie uma rota no Waze, e as
+   curvas aparecem no painel.
 
-```bash
-scripts/all.sh             # baixa -> decompila -> aplica patch -> compila
-```
+Para a Play Store não trocar este Waze pelo Waze comum, abra o Waze na Play Store, toque em ⋮ e desligue
+**Ativar atualização automática**. (No Android 14 ou mais novo, a Play Store precisa pedir sua confirmação
+antes de qualquer forma.)
 
-Ou passo a passo:
+## Se algo der errado
 
-```bash
-scripts/fetch-apk.sh       # apk/base.apk + apk/split_config.*.apk
-scripts/decompile.sh       # build/base_apktool
-scripts/patch.sh           # injeta 4 hooks smali + a <activity> do atalho
-scripts/framecheck.sh      # teste de layout dos bytes do frame, sem a moto
-scripts/build.sh           # compila o pacote Wazeology -> dex, enxerta na base intacta, empacota base + splits em ./wazeology.apk
-```
+O Installer explica o que aconteceu em palavras simples e mostra um botão que resolve, como
+**Tentar de novo** ou **Remover o Waze atual**. Alguns casos comuns:
 
-O `fetch-apk.sh` e o `decompile.sh` pulam o trabalho quando suas saídas já estão no workspace, então recompilar
-é rápido. Rodar `FORCE=1 scripts/all.sh` baixa e decompila de novo do zero.
+- **Não foi possível baixar o Waze** ou **O APKPure não está respondendo**: tente de novo mais tarde. Se
+  continuar falhando, consiga o arquivo `.xapk` do Waze 5.23.0.2 (ou todos os arquivos `.apk` dele) de
+  outro jeito e escolha **Usar arquivos do Waze que já tenho**.
+- **O Play Protect bloqueou a instalação** ou **O Android bloqueou a instalação**: veja o passo 5 acima.
+- **Outro Waze está atrapalhando**: outro Waze foi instalado nesse meio-tempo. Toque em
+  **Remover o Waze atual** e instale de novo.
 
-O apk empacotado inclui todos os idiomas que o Waze traz. Para incluir só alguns, defina `LANGS`, por exemplo
-`LANGS="pt en" scripts/all.sh` (ou `scripts/build.sh`). A ABI do aparelho e a densidade de tela entram sempre.
+Se precisar de ajuda, abra **Mais** na parte de baixo do Installer, toque em **Mostrar detalhes** e depois
+em **Copiar**, e cole os detalhes em uma [issue no GitHub](https://github.com/agstrc/wazeology/issues).
 
-A build deixa o `./wazeology.apk` na raiz do repositório. Instale-o no aparelho por sideload: copie o arquivo
-e abra com o instalador de pacotes do aparelho, ou rode `adb install ./wazeology.apk` de uma máquina que tenha
-adb. (Instalar por cima do Waze da Play Store exige desinstalar essa cópia antes, porque as assinaturas diferem.)
+## Atualizar e remover
 
-Depois, no aparelho: abra o ícone **Wazeology** → **Scan** → toque na sua moto → aceite o pareamento no painel.
-(A tela Wazeology é em inglês.) Inicie uma rota no Waze e os frames de navegação passam a fluir para o painel.
-O **Log** dentro do app tem exportação por **Share** e **Copy**.
+Quando sair um Wazeology Installer novo, baixe-o na
+[página de versões](https://github.com/agstrc/wazeology/releases/latest) e instale por cima do antigo. Ele
+avisa quando o seu Waze com Wazeology precisa de atualização.
 
-O [`DEVELOPMENT.md`](DEVELOPMENT.md) (em inglês) explica como a build funciona por dentro: o enxerto (graft),
-os hooks smali, a regra de ouro de nunca deixar o apktool reconstruir os recursos, como os splits são
-empacotados em um único apk e o próprio protocolo BLE.
+Depois de instalar, você pode liberar o espaço usado na instalação: no Installer, abra **Mais** e toque em
+**Apagar arquivos baixados**. O Waze com Wazeology continua funcionando. Para remover tudo, desinstale o Waze
+e o Wazeology Installer como qualquer outro app.
+
+## Outras formas de instalar
+
+Se você tem um computador e está acostumado com a linha de comando, pode gerar o Waze com Wazeology por
+conta própria e instalar pelo cabo USB com o adb, sem o Installer. O [`DEVELOPMENT.md`](DEVELOPMENT.md)
+(em inglês) explica como e também mostra como tudo funciona por dentro.
+
+## Segurança
+
+Este projeto conversa com o painel de instrumentos da sua moto. Teste primeiro sem pilotar: com o Waze
+seguindo uma rota e a moto parada, confira se as curvas no painel batem com as do celular. Quando for pilotar
+com ele, trate-o como qualquer outro instrumento do painel e mantenha os olhos na estrada.
+
+Modificar o Waze provavelmente viola os Termos de Serviço dele. Quem corre esse risco é você, no seu celular e
+na sua conta, e nada aqui tira esse risco de você.
 
 ## Aviso legal
 
 Sem afiliação, endosso ou vínculo com Waze, Google ou Kawasaki. "Waze" e "Kawasaki" são marcas registradas de
 seus respectivos donos, citadas aqui apenas para descrever compatibilidade.
 
-Este repositório não contém código, assets nem dados do Waze ou da Kawasaki. Ele traz um pipeline de build e um
-pequeno pacote injetado que rodam sobre a sua própria cópia do Waze, baixada de forma legítima, que o
-`fetch-apk.sh` obtém no momento da build. Nada de proprietário é redistribuído. O protocolo BLE do painel da
-Kawasaki foi obtido por engenharia reversa independente para fins de interoperabilidade, e não retirado da
-documentação ou do código-fonte da Kawasaki.
+O Wazeology Installer publicado na página de versões contém material derivado de uma versão específica do
+Waze (código de programa modificado e o manifesto do app). O app do Waze em si não está nele: o Installer
+baixa o Waze no seu celular e modifica essa cópia. Tudo é fornecido como está, sem garantia, e você usa por
+sua conta e risco. O protocolo Bluetooth da Kawasaki foi decifrado de forma independente para fins de
+interoperabilidade, e não retirado da documentação ou do código-fonte da Kawasaki.
 
 ## Licença
 
 [Apache-2.0](LICENSE)
 
-A licença cobre apenas o código próprio deste repositório: o pipeline de build e o pacote injetado
-`com.waze.wazeology`. Ela não licencia, e nem poderia licenciar, nenhum material do Waze ou da Kawasaki. Veja o
-[Aviso legal](#aviso-legal).
+A licença cobre apenas o código próprio deste repositório: o pipeline de build, o pacote injetado
+`com.waze.wazeology` e o app instalador. Ela não licencia, e nem poderia licenciar, nenhum material do Waze
+ou da Kawasaki. Veja o [Aviso legal](#aviso-legal).

@@ -1,7 +1,11 @@
-# Single toolchain image for the whole Waze -> Kawasaki patch pipeline.
+# Single toolchain image for building the Wazeology Installer app (which builds Waze with Wazeology on the phone).
 # Everything the scripts need runs inside this image; the host only needs Docker.
 #
-#   apktool  d8  zipalign  apksigner  aapt2  apkeep  javac  python3  zip
+#   apktool  baksmali/smali (host-side patch asset generation)
+#   apkeep   (fetch the pinned Waze bundle)
+#   javac  d8  aapt2  zipalign  apksigner  zip  python3
+#   apksig  (pinned jar: dexed into the installer app so it signs the patched Waze on the phone,
+#            and put on the host-JVM test classpath)
 #
 # All versions are pinned for reproducible builds.
 FROM eclipse-temurin:17-jdk-jammy
@@ -30,29 +34,29 @@ RUN mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools \
         "platforms;${ANDROID_PLATFORM}" \
         "build-tools;${ANDROID_BUILD_TOOLS}" > /dev/null
 
-# --- Apktool (pinned jar + wrapper) ---
+# --- Apktool (pinned jar + wrapper): host-side only ---
+# Decompiles the pinned base.apk for smali + manifest editing and reassembles it once, at installer
+# build time, to produce the patched classes5.dex/classes6.dex and the binary AndroidManifest.xml
+# that ship inside the installer app as assets. Never runs on the phone.
 ARG APKTOOL_VERSION=2.10.0
 RUN wget -q https://github.com/iBotPeaches/Apktool/releases/download/v${APKTOOL_VERSION}/apktool_${APKTOOL_VERSION}.jar \
         -O /opt/apktool.jar \
     && printf '#!/bin/sh\nexec java -jar /opt/apktool.jar "$@"\n' > /usr/local/bin/apktool \
     && chmod +x /usr/local/bin/apktool
 
-# --- apkeep (pinned prebuilt EFF binary) ---
+# --- apkeep (pinned prebuilt EFF binary): fetches the pinned Waze bundle (apk-pure default) ---
 ARG APKEEP_VERSION=1.0.0
 RUN wget -q https://github.com/EFForg/apkeep/releases/download/${APKEEP_VERSION}/apkeep-x86_64-unknown-linux-gnu \
         -O /usr/local/bin/apkeep \
     && chmod +x /usr/local/bin/apkeep
 
-# --- APKEditor (pinned jar): binary split-APK merger (ARSCLib) ---
-# Merges base + config splits into ONE standalone apk by merging the binary resource tables and
-# copying every res/* entry VERBATIM. It never re-encodes resource XML through aapt2, so it does
-# NOT trigger the drawable corruption the golden rule guards against (see DEVELOPMENT.md §11).
-ARG APKEDITOR_VERSION=1.4.9
-ARG APKEDITOR_SHA256=a9cd40df818845456be6d696de6110c89edf4b0a0580cb83438ed6b25a366e67
-RUN wget -q https://github.com/REAndroid/APKEditor/releases/download/V${APKEDITOR_VERSION}/APKEditor-${APKEDITOR_VERSION}.jar \
-        -O /opt/apkeditor.jar \
-    && echo "${APKEDITOR_SHA256}  /opt/apkeditor.jar" | sha256sum -c - \
-    && printf '#!/bin/sh\nexec java -jar /opt/apkeditor.jar "$@"\n' > /usr/local/bin/apkeditor \
-    && chmod +x /usr/local/bin/apkeditor
+# --- apksig (pinned jar): APK signing ---
+# Runs in two places: dexed into the installer app (signs the patched Waze on the phone) and on the
+# host-JVM test classpath (signs the test graft before apksigner verifies it).
+ARG APKSIG_VERSION=8.7.3
+ARG APKSIG_SHA256=c070ed1394629d74641aa0906f60b2ffa1ee77e6366a1f93437f59717b1aeb89
+RUN wget -q https://dl.google.com/android/maven2/com/android/tools/build/apksig/${APKSIG_VERSION}/apksig-${APKSIG_VERSION}.jar \
+        -O /opt/apksig.jar \
+    && echo "${APKSIG_SHA256}  /opt/apksig.jar" | sha256sum -c -
 
 WORKDIR /work

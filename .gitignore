@@ -25,3 +25,6 @@ __pycache__/
 # OS/editor noise
 .DS_Store
 *.swp
+
+# Build artifacts from both targets: dist/wazeology-installer.apk and dist/waze/*.apk.
+/dist/

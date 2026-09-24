@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.wazeology.installer"
+    android:versionCode="1"
+    android:versionName="1.0">
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
+
+    <!-- Download the pinned Waze bundle from APKPure, and wait for the network to come back when a
+         download is interrupted. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Install Waze with Wazeology through a PackageInstaller session. Without it the "Install
+         unknown apps" toggle stays off and canRequestPackageInstalls() fails. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Reinstalls over our own earlier install need no extra confirmation (API 31+). -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"/>
+    <!-- Claim update ownership, so the Play Store must ask before replacing this Waze (API 34+). -->
+    <uses-permission android:name="android.permission.ENFORCE_UPDATE_OWNERSHIP"/>
+
+    <!-- Remove a differently signed Waze (PackageInstaller.uninstall). From API 28 the system
+         uninstaller silently closes for callers that do not declare it. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES"/>
+
+    <!-- Long jobs (the ~180 MB download, the build, handing the result to Android) run in a
+         foreground service with a progress notification, so the screen can turn off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <!-- See which Waze is installed (and who signed it) before anything is downloaded. -->
+    <queries>
+        <package android:name="com.waze"/>
+    </queries>
+
+    <application
+        android:label="Wazeology Installer"
+        android:icon="@mipmap/icon"
+        android:allowBackup="false"
+        android:largeHeap="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <!-- singleTop, not singleTask: relaunching a singleTask root would destroy Android's install
+             confirmation sitting above it in the task. Every configuration change is handled in
+             place (the screen re-renders from JobStore), so nothing restarts mid-job. -->
+        <activity android:name=".InstallerActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|locale|layoutDirection|density|fontScale">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <service android:name=".JobService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
+
+        <!-- Install/uninstall results, delivered even when the process died meanwhile. -->
+        <receiver android:name=".InstallResultReceiver" android:exported="false"/>
+        <receiver android:name=".CancelReceiver" android:exported="false"/>
+    </application>
+</manifest>

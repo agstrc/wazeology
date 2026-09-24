@@ -9,9 +9,9 @@ run_tools bash -lc '
 set -e
 rm -rf build/framecheck && mkdir -p build/framecheck
 javac -d build/framecheck \
-  src/com/waze/wazeology/Kawasaki.java src/com/waze/wazeology/FlagMode.java \
-  src/com/waze/wazeology/DistanceUnit.java src/com/waze/wazeology/TurnType.java \
-  src/com/waze/wazeology/Command.java src/com/waze/wazeology/Capabilities.java \
-  src/com/waze/wazeology/Frames.java src/test/FramesCheck.java
+  payload/java/com/waze/wazeology/Kawasaki.java payload/java/com/waze/wazeology/FlagMode.java \
+  payload/java/com/waze/wazeology/DistanceUnit.java payload/java/com/waze/wazeology/TurnType.java \
+  payload/java/com/waze/wazeology/Command.java payload/java/com/waze/wazeology/Capabilities.java \
+  payload/java/com/waze/wazeology/Frames.java payload/test/FramesCheck.java
 java -cp build/framecheck FramesCheck
 '
