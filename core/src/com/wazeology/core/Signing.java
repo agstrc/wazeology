@@ -15,8 +15,8 @@ import java.util.List;
 /**
  * Signs an apk with the embedded PKCS12 key using apksig (the same library apksigner wraps). The
  * jar is dexed into the installer app and sits on the host classpath (BuildWaze, the gates), so
- * this one code path signs both build targets and is exercised in the build gate. v2+v3 only: Waze itself needs API 32, so nothing older than 28
- * ever verifies these signatures, and the stale v1 remnants are dropped by the graft.
+ * this one code path signs both build targets and is exercised in the build gate. v2+v3 only: the installer requires API 32
+ * (Pins.MIN_SDK), so nothing older than 28 ever verifies these signatures, and the stale v1 remnants are dropped by the graft.
  */
 public final class Signing {
 

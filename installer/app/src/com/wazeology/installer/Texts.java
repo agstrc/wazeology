@@ -47,9 +47,9 @@ final class Texts {
     }
 
     String unsupportedAndroid(int sdk) {
-        return t("Waze " + V + " needs Android 12L or newer. This phone runs an older Android (API "
+        return t("Waze with Wazeology needs Android 12L or newer. This phone runs an older Android (API "
                         + sdk + ").",
-                "O Waze " + V + " precisa do Android 12L ou mais novo. Este celular tem um Android mais "
+                "O Waze com Wazeology precisa do Android 12L ou mais novo. Este celular tem um Android mais "
                         + "antigo (API " + sdk + ").");
     }
 
@@ -130,9 +130,9 @@ final class Texts {
     }
 
     String prepareIntro() {
-        return t("Downloads Waze " + V + " from APKPure (about 181 MB, Wi-Fi recommended) and adds "
+        return t("Downloads Waze " + V + " from APKPure (about " + Pins.WAZE_DOWNLOAD_MB + " MB, Wi-Fi recommended) and adds "
                         + "Wazeology to it. Everything happens on this phone and nothing is uploaded.",
-                "Baixa o Waze " + V + " do APKPure (cerca de 181 MB, de preferência no Wi-Fi) e "
+                "Baixa o Waze " + V + " do APKPure (cerca de " + Pins.WAZE_DOWNLOAD_MB + " MB, de preferência no Wi-Fi) e "
                         + "adiciona o Wazeology. Tudo acontece neste celular e nada é enviado.");
     }
 
@@ -634,8 +634,8 @@ final class Texts {
                 return t("Download Waze again so the app gets the right parts for this phone.",
                         "Baixe o Waze de novo para o app pegar as partes certas para este celular.");
             case ANDROID_TOO_OLD:
-                return t("Waze " + V + " needs Android 12L or newer.",
-                        "O Waze " + V + " precisa do Android 12L ou mais novo.");
+                return t("Waze with Wazeology needs Android 12L or newer.",
+                        "O Waze com Wazeology precisa do Android 12L ou mais novo.");
             case RESTRICTED:
                 return t("A work profile, parental controls or a phone setting blocks app installs. On "
                                 + "Xiaomi phones, turn on \"Install via USB\" in Developer options.",

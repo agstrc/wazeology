@@ -43,7 +43,7 @@ tried them yet. Source: [Kawasaki](https://www.global-kawasaki-motors.com/kawasa
 ## What you need
 
 - An Android phone running Android 12L or newer. iPhones can't run it.
-- About 400 MB of free space, and preferably Wi-Fi: the setup downloads Waze once (about 181 MB).
+- About 400 MB of free space, and preferably Wi-Fi: the setup downloads Waze once (about 182 MB).
 - One of the motorcycles above.
 
 You don't need a computer; everything happens on the phone.
@@ -96,7 +96,7 @@ The Installer tells you what happened in plain words and shows one button that f
 **Try again** or **Remove current Waze**. A few common cases:
 
 - **Couldn't download Waze** or **APKPure isn't responding**: try again later. If it keeps failing, get the
-  Waze 5.23.0.2 `.xapk` file (or all of its `.apk` files) some other way, and choose
+  Waze 5.24.0.2 `.xapk` file (or all of its `.apk` files) some other way, and choose
   **Use Waze files I already have**.
 - **Play Protect stopped the install** or **Android blocked the install**: see step 5 above.
 - **Another Waze is in the way**: another Waze got installed meanwhile. Tap **Remove current Waze**, then

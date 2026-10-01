@@ -15,8 +15,16 @@ public final class Pins {
 
     /** The only Waze version the patch assets are built for. */
     public static final String WAZE_PACKAGE = "com.waze";
-    public static final int WAZE_VERSION_CODE = 1030725;
-    public static final String WAZE_VERSION_NAME = "5.23.0.2";
+    public static final int WAZE_VERSION_CODE = 1030730;
+    public static final String WAZE_VERSION_NAME = "5.24.0.2";
+
+    /** Size of the pinned arm64 XAPK on APKPure in MiB, rounded (190,651,245 bytes), shown to riders
+     *  before they download. FetchWaze fails when the advertised size no longer rounds to it. */
+    public static final int WAZE_DOWNLOAD_MB = 182;
+
+    /** Wazeology's support floor: Android 12L (API 32). A deliberate choice, not Waze's: Waze 5.24.0.2
+     *  itself declares minSdk 29. The installer refuses older phones. */
+    public static final int MIN_SDK = 32;
 
     /** The pristine base.apk holds classes.dex .. classes10.dex; the payload dex is appended as the next
      *  contiguous index (ART loads every classesN.dex from the base APK, so no gaps are allowed). */
@@ -24,8 +32,8 @@ public final class Pins {
     public static final String PAYLOAD_DEX = "classes11.dex";
 
     /** Hook dexes the patch replaces wholesale. classes5.dex carries the FreeMapAppActivity startup
-     *  hook, classes6.dex the four NavigationInfoNativeManager nav hooks. */
-    public static final String[] HOOK_DEXES = {"classes5.dex", "classes6.dex"};
+     *  hook, classes7.dex the four NavigationInfoNativeManager nav hooks. */
+    public static final String[] HOOK_DEXES = {"classes5.dex", "classes7.dex"};
 
     /** Orphan resource whose file bytes the launcher-icon overwrite replaces (mipmap/launch_icon_round,
      *  AndResGuard-shortened path). Overwriting the content of an existing res/* entry never touches
@@ -45,8 +53,8 @@ public final class Pins {
     public static final char[] P12_PASSWORD = "wazeology".toCharArray();
     public static final String P12_ALIAS = "wazeology";
 
-    /** Signing floor for the patched apks (v2+v3 blocks, no v1). Waze itself needs API 32, so nothing
-     *  lower ever has to verify these signatures. */
+    /** Signing floor for the patched apks (v2+v3 blocks, no v1). The installer requires API 32
+     *  (MIN_SDK), so nothing lower ever has to verify these signatures. */
     public static final int SIGN_MIN_SDK = 28;
 
     public static String patchAsset(String name) {

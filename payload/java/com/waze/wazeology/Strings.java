@@ -138,7 +138,7 @@ final class Strings {
             unsupportedTitle   = "This cluster can't show navigation";
             unsupportedBody    = "It's a different model or firmware than Wazeology supports.";
             connected          = "Connected";
-            pairing            = "Pairing — enter passkey";
+            pairing            = "Pairing: enter passkey";
             subscribing        = "Subscribing…";
             initializing       = "Initializing…";
             bluetoothOff       = "Bluetooth is off";
@@ -153,7 +153,7 @@ final class Strings {
             cancelPairing      = "Cancel pairing";
             searchingDevices   = "Searching for your motorcycle…";
             noMotorcycleFound  = "No motorcycle found. Make sure the cluster is powered on, then scan again.";
-            noDevicesYet       = "(no devices yet — tap Scan)";
+            noDevicesYet       = "(no devices yet, tap Scan)";
             unnamed            = "(unnamed)";
             motorcycleFallback = "motorcycle";
             cuePrefix          = "Cue: ";
@@ -172,15 +172,15 @@ final class Strings {
     }
 
     String savedDisconnected(String name) {
-        return pt ? "Salvo: " + name + ", desconectado" : "Saved: " + name + " — disconnected";
+        return pt ? "Salvo: " + name + ", desconectado" : "Saved: " + name + ", disconnected";
     }
 
     String savedBluetoothOff(String name) {
-        return pt ? "Salvo: " + name + ", Bluetooth desligado" : "Saved: " + name + " — Bluetooth off";
+        return pt ? "Salvo: " + name + ", Bluetooth desligado" : "Saved: " + name + ", Bluetooth off";
     }
 
     String savedNeedsPairing(String name) {
-        return pt ? "Salvo: " + name + ", precisa parear" : "Saved: " + name + " — needs pairing";
+        return pt ? "Salvo: " + name + ", precisa parear" : "Saved: " + name + ", needs pairing";
     }
 
     @SuppressWarnings("deprecation")

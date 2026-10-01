@@ -28,11 +28,11 @@ aapt2 link -o build/gen/installer/installer-unsigned.apk \
   -I "$1" \
   -A "$2" \
   --min-sdk-version 26 --target-sdk-version 34 \
-  --version-code 1 --version-name 1.0 \
+  --version-code "$3" --version-name "$4" \
   build/gen/installer/res/*.flat
 for d in build/gen/installer/dexout/classes*.dex; do
     python3 scripts/zip_add.py build/gen/installer/installer-unsigned.apk "$(basename "$d")" "$d"
-done' _ "$ANDROID_JAR" "$ASSETS_DIR"
+done' _ "$ANDROID_JAR" "$ASSETS_DIR" "$INSTALLER_VERSION_CODE" "$INSTALLER_VERSION_NAME"
 
 # 3. Align + sign the installer apk into dist/wazeology-installer.apk.
 ensure_keystore

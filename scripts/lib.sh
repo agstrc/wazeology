@@ -34,14 +34,15 @@ PINS="$CORE_SRC/com/wazeology/core/Pins.java"
 # The build engine (core ... Pins.java) is compiled against the same pins; build-assets.sh greps
 # both sides and fails when they drift.
 WAZE_PACKAGE="com.waze"
-WAZE_VERSION="${WAZE_VERSION:-5.23.0.2}"      # pinned default; overridable via .env
-WAZE_VERSION_CODE="1030725"
+WAZE_VERSION="${WAZE_VERSION:-5.24.0.2}"      # pinned default; overridable via .env
+WAZE_VERSION_CODE="1030730"
 APK_SOURCE="${APK_SOURCE:-apk-pure}"          # apk-pure (default) | google-play
 IMAGE="waze-tools:latest"
 
 # Installer app identity + tool paths in the image (keep in sync with docker/Dockerfile).
 INSTALLER_PACKAGE="com.wazeology.installer"
-INSTALLER_VERSION_CODE="1"
+INSTALLER_VERSION_CODE="2"                    # bump for every release, or riders cannot update
+INSTALLER_VERSION_NAME="1.1.0"
 INSTALLER_MIN_SDK="26"
 INSTALLER_TARGET_SDK="34"
 ANDROID_JAR="/opt/android-sdk/platforms/android-34/android.jar"

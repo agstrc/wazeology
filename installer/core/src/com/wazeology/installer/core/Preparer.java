@@ -200,17 +200,12 @@ public final class Preparer {
             }
         }
         if (pick == null) {
-            for (ApkPure.Candidate c : candidates) {
-                if ("XAPK".equals(c.type)) {
-                    Boolean fits = ApkPure.remoteHasNativeSplit(c, abi, cancel);
-                    if (Boolean.FALSE.equals(fits)) {
-                        l.log("skipping a bundle without " + ApkPure.nativeSplitName(abi));
-                        continue;
-                    }
+            pick = ApkPure.pick(candidates, abi, cancel, new ApkPure.Log() {
+                @Override
+                public void log(String line) {
+                    l.log(line);
                 }
-                pick = c;
-                break;
-            }
+            });
             if (pick == null) {
                 throw new Outcome.Failure(Outcome.NO_MATCHING_DOWNLOAD, "no bundle carries "
                         + ApkPure.nativeSplitName(abi));

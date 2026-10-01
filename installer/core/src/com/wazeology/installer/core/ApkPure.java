@@ -21,7 +21,8 @@ import java.util.zip.ZipFile;
  * ("XAPK" or "APK", field 8) and its download URL (field 9). The URL path segment after /b/XAPK/ is
  * base64url of "<package>_<versionCode>_<id>", which pins a candidate by versionCode rather than by
  * the version name. One build can have several assets (e.g. an arm64 + xxxhdpi bundle and an
- * armeabi-v7a + mdpi one); the server orders them by the x-abis preference sent with the request.
+ * armeabi-v7a + mdpi one) in no reliable order: x-abis does not rank them, so pick() probes each
+ * bundle for the device's native split before choosing.
  */
 public final class ApkPure {
 
@@ -138,6 +139,32 @@ public final class ApkPure {
     /** The native config split an XAPK carries for abi, e.g. config.arm64_v8a.apk. */
     public static String nativeSplitName(String abi) {
         return "config." + abi.replace('-', '_') + ".apk";
+    }
+
+    /** Where pick() reports the bundles it skips. */
+    public interface Log {
+        void log(String line);
+    }
+
+    /**
+     * The candidate to download for abi: the first XAPK whose remote listing has the native split,
+     * else the first one that could not be probed (or a plain APK), which the caller checks after the
+     * download. Bundles known to lack the split are skipped. Null when every candidate lacks it.
+     */
+    public static Candidate pick(List<Candidate> candidates, String abi, CancelToken cancel, Log log) {
+        Candidate unsure = null;
+        for (Candidate c : candidates) {
+            Boolean fits = "XAPK".equals(c.type) ? remoteHasNativeSplit(c, abi, cancel) : null;
+            if (Boolean.TRUE.equals(fits)) {
+                return c;
+            }
+            if (Boolean.FALSE.equals(fits)) {
+                log.log("skipping a bundle without " + nativeSplitName(abi));
+            } else if (unsure == null) {
+                unsure = c;
+            }
+        }
+        return unsure;
     }
 
     /**

@@ -45,7 +45,7 @@ experimentou ainda. Fonte: [Kawasaki](https://www.global-kawasaki-motors.com/kaw
 ## O que você precisa
 
 - Um celular Android com Android 12L ou mais novo. Não funciona em iPhone.
-- Cerca de 400 MB livres e, de preferência, Wi-Fi: a instalação baixa o Waze uma vez (cerca de 181 MB).
+- Cerca de 400 MB livres e, de preferência, Wi-Fi: a instalação baixa o Waze uma vez (cerca de 182 MB).
 - Uma das motos da lista acima.
 
 Não precisa de computador: tudo acontece no celular.
@@ -102,7 +102,7 @@ O Installer explica o que aconteceu em palavras simples e mostra um botão que r
 **Tentar de novo** ou **Remover o Waze atual**. Alguns casos comuns:
 
 - **Não foi possível baixar o Waze** ou **O APKPure não está respondendo**: tente de novo mais tarde. Se
-  continuar falhando, consiga o arquivo `.xapk` do Waze 5.23.0.2 (ou todos os arquivos `.apk` dele) de
+  continuar falhando, consiga o arquivo `.xapk` do Waze 5.24.0.2 (ou todos os arquivos `.apk` dele) de
   outro jeito e escolha **Usar arquivos do Waze que já tenho**.
 - **O Play Protect bloqueou a instalação** ou **O Android bloqueou a instalação**: veja o passo 5 acima.
 - **Outro Waze está atrapalhando**: outro Waze foi instalado nesse meio-tempo. Toque em

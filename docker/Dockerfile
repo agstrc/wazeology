@@ -36,7 +36,7 @@ RUN mkdir -p ${ANDROID_SDK_ROOT}/cmdline-tools \
 
 # --- Apktool (pinned jar + wrapper): host-side only ---
 # Decompiles the pinned base.apk for smali + manifest editing and reassembles it once, at installer
-# build time, to produce the patched classes5.dex/classes6.dex and the binary AndroidManifest.xml
+# build time, to produce the patched classes5.dex/classes7.dex and the binary AndroidManifest.xml
 # that ship inside the installer app as assets. Never runs on the phone.
 ARG APKTOOL_VERSION=2.10.0
 RUN wget -q https://github.com/iBotPeaches/Apktool/releases/download/v${APKTOOL_VERSION}/apktool_${APKTOOL_VERSION}.jar \

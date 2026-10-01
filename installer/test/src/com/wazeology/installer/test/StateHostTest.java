@@ -67,20 +67,20 @@ final class StateHostTest {
     private static void apkPure() throws Exception {
         // The APKPure response parser the app uses to fetch the pinned bundle (offline, on a
         //    synthetic record shaped like the live protobuf: sha1, size, flag, type, url).
-        String sha1 = "4591a7f63f6fa1843383d999fc1afcdd40fc3afe";
+        String sha1 = "ae5fa78889b3b25c748e62be6b8fb326b86e093a";
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         apkPureAsset(body, "0000000000000000000000000000000000000000", "XAPK",
-                Pins.WAZE_PACKAGE + "_" + (Pins.WAZE_VERSION_CODE + 5) + "_a9fc6fee", 189598117L);
-        apkPureAsset(body, sha1, "XAPK", Pins.WAZE_PACKAGE + "_" + Pins.WAZE_VERSION_CODE + "_4418e662",
-                189598117L);
-        apkPureAsset(body, sha1, "XAPK", Pins.WAZE_PACKAGE + "_" + Pins.WAZE_VERSION_CODE + "_4418e662",
-                189598117L);
+                Pins.WAZE_PACKAGE + "_" + (Pins.WAZE_VERSION_CODE + 2) + "_7c44a882", 172633014L);
+        apkPureAsset(body, sha1, "XAPK", Pins.WAZE_PACKAGE + "_" + Pins.WAZE_VERSION_CODE + "_a5d987c7",
+                190651245L);
+        apkPureAsset(body, sha1, "XAPK", Pins.WAZE_PACKAGE + "_" + Pins.WAZE_VERSION_CODE + "_a5d987c7",
+                190651245L);
         List<ApkPure.Candidate> cands =
                 ApkPure.parse(body.toByteArray(), Pins.WAZE_PACKAGE, Pins.WAZE_VERSION_CODE);
         eq(1, cands.size(), "apkpure: one deduplicated candidate for the pinned versionCode");
         eq("XAPK", cands.get(0).type, "apkpure: candidate type");
         eq(sha1, cands.get(0).sha1, "apkpure: advertised sha1 read");
-        eq(189598117L, cands.get(0).size, "apkpure: advertised size read");
+        eq(190651245L, cands.get(0).size, "apkpure: advertised size read");
 
     }
 
@@ -490,6 +490,45 @@ final class StateHostTest {
             zip[0] = zipOf("notes.txt", "hello", split, "x");
             eq(Boolean.TRUE, ApkPure.remoteHasNativeSplit(zipCand, "arm64-v8a", CancelToken.NONE),
                     "abi probe: a listed split is found");
+
+            // APKPure lists a build's bundles in no reliable order: the one with the device's split
+            // wins wherever it sits, even when an earlier one cannot be probed
+            byte[] wrong = zipOf("config.armeabi_v7a.apk", "x", "config.mdpi.apk", "x");
+            byte[] right = zipOf(split, "x", "config.xxxhdpi.apk", "x");
+            String rightSha1 = hex(MessageDigest.getInstance("SHA-1").digest(right));
+            server.createContext("/abi/wrong", zipHandler(wrong, true));
+            server.createContext("/abi/norange", zipHandler(wrong, false));
+            server.createContext("/abi/right", zipHandler(right, true));
+            ApkPure.Candidate wrongCand = xapkCandidate(base + "/abi/wrong", null, wrong.length);
+            ApkPure.Candidate norangeCand = xapkCandidate(base + "/abi/norange", null, wrong.length);
+            ApkPure.Candidate rightCand = xapkCandidate(base + "/abi/right", rightSha1, right.length);
+            ApkPure.Log quiet = new ApkPure.Log() {
+                @Override
+                public void log(String line) {
+                }
+            };
+            eq(rightCand, ApkPure.pick(Arrays.asList(wrongCand, rightCand), "arm64-v8a", CancelToken.NONE,
+                    quiet), "pick: a bundle without the split is skipped");
+            eq(rightCand, ApkPure.pick(Arrays.asList(norangeCand, rightCand), "arm64-v8a",
+                    CancelToken.NONE, quiet), "pick: a confirmed bundle beats an earlier unprobed one");
+            eq(norangeCand, ApkPure.pick(Arrays.asList(wrongCand, norangeCand), "arm64-v8a",
+                    CancelToken.NONE, quiet), "pick: an unprobed bundle is the fallback");
+            eq(null, ApkPure.pick(Arrays.asList(wrongCand), "arm64-v8a", CancelToken.NONE, quiet),
+                    "pick: nothing when every bundle lacks the split");
+            String[] orders = {"wrong first", "unprobed first"};
+            ApkPure.Candidate[] firsts = {wrongCand, norangeCand};
+            for (int i = 0; i < firsts.length; i++) {
+                SourceCache order = new SourceCache(new File(root, "order" + i));
+                try {
+                    Preparer.prepare(env(firsts[i], rightCand), order,
+                            new BuildCache(new File(root, "order" + i)), new File(root, "work-order" + i),
+                            "digest", l, CancelToken.NONE);
+                } catch (IOException expected) {
+                    // the build fails on a bundle that is not Waze; the download is what counts
+                }
+                eq(true, order.current() != null && order.current().id.equals(rightSha1),
+                        "prepare: the bundle with the split is downloaded (" + orders[i] + ")");
+            }
         } finally {
             server.stop(0);
         }
@@ -518,6 +557,36 @@ final class StateHostTest {
         return ctor.newInstance("APK", url, Pins.WAZE_VERSION_CODE, sha1, size);
     }
 
+    /** An XAPK candidate built directly, for the bundle-choice cases. */
+    private static ApkPure.Candidate xapkCandidate(String url, String sha1, long size) throws Exception {
+        java.lang.reflect.Constructor<ApkPure.Candidate> ctor = ApkPure.Candidate.class.getDeclaredConstructor(
+                String.class, String.class, int.class, String.class, long.class);
+        ctor.setAccessible(true);
+        return ctor.newInstance("XAPK", url, Pins.WAZE_VERSION_CODE, sha1, size);
+    }
+
+    /** Serves z whole, or (when ranges) also its suffix ("bytes=-n") and open ("bytes=k-") ranges. */
+    private static HttpHandler zipHandler(final byte[] z, final boolean ranges) {
+        return new HttpHandler() {
+            @Override
+            public void handle(HttpExchange ex) throws IOException {
+                String range = ranges ? ex.getRequestHeaders().getFirst("Range") : null;
+                int start = 0;
+                if (range != null) {
+                    String spec = range.substring("bytes=".length());
+                    start = spec.startsWith("-")
+                            ? Math.max(0, z.length - Integer.parseInt(spec.substring(1)))
+                            : Integer.parseInt(spec.substring(0, spec.indexOf('-')));
+                    ex.getResponseHeaders().add("Content-Range",
+                            "bytes " + start + "-" + (z.length - 1) + "/" + z.length);
+                }
+                ex.sendResponseHeaders(range != null ? 206 : 200, z.length - start);
+                ex.getResponseBody().write(z, start, z.length - start);
+                ex.close();
+            }
+        };
+    }
+
     /** A stored zip of name/content pairs. */
     private static byte[] zipOf(String... entries) throws IOException {
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
@@ -531,7 +600,7 @@ final class StateHostTest {
         return bytes.toByteArray();
     }
 
-    private static Preparer.Env env(final ApkPure.Candidate cand) {
+    private static Preparer.Env env(final ApkPure.Candidate... cands) {
         return new Preparer.Env() {
             @Override
             public BuildPipeline.Assets assets() {
@@ -568,9 +637,7 @@ final class StateHostTest {
 
             @Override
             public List<ApkPure.Candidate> lookup() {
-                List<ApkPure.Candidate> l = new ArrayList<ApkPure.Candidate>();
-                l.add(cand);
-                return l;
+                return new ArrayList<ApkPure.Candidate>(Arrays.asList(cands));
             }
         };
     }

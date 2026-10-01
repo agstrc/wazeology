@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.wazeology.installer"
-    android:versionCode="1"
-    android:versionName="1.0">
+    package="com.wazeology.installer">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
 
     <!-- Download the pinned Waze bundle from APKPure, and wait for the network to come back when a

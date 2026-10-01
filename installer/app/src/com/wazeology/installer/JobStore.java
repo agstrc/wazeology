@@ -249,7 +249,7 @@ final class JobStore {
 
     UiModel.Facts facts(WazeProbe.Result waze) {
         UiModel.Facts f = new UiModel.Facts();
-        f.sdkOk = Build.VERSION.SDK_INT >= 32;
+        f.sdkOk = Build.VERSION.SDK_INT >= Pins.MIN_SDK;
         f.abiOk = abiOk();
         f.job = job.snapshot();
         Disk d = disk();

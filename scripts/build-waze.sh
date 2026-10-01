@@ -14,8 +14,8 @@ cd "$REPO_ROOT"
     || { echo "$ASSETS_DIR missing — run scripts/build-assets.sh first" >&2; exit 1; }
 
 OUT="$DIST_DIR/waze"
-log "compiling BuildWaze (core + cli + apksig) for the host JVM"
-compile_java build/gen/cli "$APKSIG_JAR" "$CORE_SRC" "$CLI_SRC"
+log "compiling BuildWaze (core + installer/core + cli + apksig) for the host JVM"
+compile_java build/gen/cli "$APKSIG_JAR" "$CORE_SRC" "$INSTALLER_CORE_SRC" "$CLI_SRC"
 
 log "building Waze with Wazeology -> $OUT"
 run_tools java -cp "build/gen/cli:$APKSIG_JAR" com.wazeology.cli.BuildWaze /work \

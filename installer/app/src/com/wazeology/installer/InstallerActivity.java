@@ -778,6 +778,8 @@ public class InstallerActivity extends Activity implements JobStore.Listener {
         bannerRow.setOrientation(LinearLayout.HORIZONTAL);
         bannerRow.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
         Button dismiss = textButton(tx.dismiss());
+        dismiss.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         dismiss.setOnClickListener(v -> store.clearOutcome());
         bannerRow.addView(dismiss);
         bannerAction = filledButton("");
