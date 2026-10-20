@@ -36,8 +36,10 @@ public final class GraftHostTest {
         outDir.mkdirs();
 
         byte[] manifestBin = read(new File(assets, Pins.MANIFEST_ASSET));
-        byte[] classes5 = read(new File(assets, Pins.HOOK_DEXES[0]));
-        byte[] classes7 = read(new File(assets, Pins.HOOK_DEXES[1]));
+        byte[][] hooks = new byte[Pins.HOOK_DEXES.length][];
+        for (int i = 0; i < hooks.length; i++) {
+            hooks[i] = read(new File(assets, Pins.HOOK_DEXES[i]));
+        }
         byte[] payload = read(new File(assets, Pins.PAYLOAD_DEX));
         byte[] icon = read(new File(assets, Pins.ICON_ASSET));
 
@@ -54,11 +56,11 @@ public final class GraftHostTest {
         byte[] untouchedSample = Graft.readEntry(pristine, dexes.get(3)); // classes4.dex
 
         // 2. Graft with the same PatchSet the app builds from the same assets.
-        Graft.PatchSet ps = new Graft.PatchSet()
-                .replaceEntry(Pins.MANIFEST_ENTRY, manifestBin)
-                .replaceEntry(Pins.HOOK_DEXES[0], classes5)
-                .replaceEntry(Pins.HOOK_DEXES[1], classes7)
-                .replaceIfPresent(Pins.ICON_PATH, icon)
+        Graft.PatchSet ps = new Graft.PatchSet().replaceEntry(Pins.MANIFEST_ENTRY, manifestBin);
+        for (int i = 0; i < hooks.length; i++) {
+            ps.replaceEntry(Pins.HOOK_DEXES[i], hooks[i]);
+        }
+        ps.replaceIfPresent(Pins.ICON_PATH, icon)
                 .appendEntry(Pins.PAYLOAD_DEX, payload);
         File grafted = new File(outDir, "grafted.apk");
         Graft.graft(pristine, grafted, ps, null);
@@ -68,8 +70,9 @@ public final class GraftHostTest {
         eq(Pins.PAYLOAD_DEX, graftedDexes.get(graftedDexes.size() - 1), "payload dex appended last");
         eq(pristineArsc, Graft.readEntry(grafted, Pins.ARSC_ENTRY), "resources.arsc byte-identical");
         eq(manifestBin, Graft.readEntry(grafted, Pins.MANIFEST_ENTRY), "manifest swapped");
-        eq(classes5, Graft.readEntry(grafted, Pins.HOOK_DEXES[0]), "classes5.dex swapped");
-        eq(classes7, Graft.readEntry(grafted, Pins.HOOK_DEXES[1]), "classes7.dex swapped");
+        for (int i = 0; i < hooks.length; i++) {
+            eq(hooks[i], Graft.readEntry(grafted, Pins.HOOK_DEXES[i]), Pins.HOOK_DEXES[i] + " swapped");
+        }
         eq(payload, Graft.readEntry(grafted, Pins.PAYLOAD_DEX), "payload dex content");
         eq(icon, Graft.readEntry(grafted, Pins.ICON_PATH), "icon bytes overwritten");
         eq(untouchedSample, Graft.readEntry(grafted, dexes.get(3)), "untouched dex passthrough");

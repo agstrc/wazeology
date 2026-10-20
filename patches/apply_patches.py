@@ -20,7 +20,7 @@ import re
 import sys
 
 NAV_SMALI = "smali_classes7/com/waze/navigate/NavigationInfoNativeManager.smali"
-APP_SMALI = "smali_classes5/com/waze/FreeMapAppActivity.smali"
+APP_SMALI = "smali_classes7/com/waze/FreeMapAppActivity.smali"
 MANIFEST_REL = "AndroidManifest.xml"
 PATCHES_DIR = os.path.dirname(os.path.abspath(__file__))
 

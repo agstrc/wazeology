@@ -29,7 +29,7 @@ build, plus an Android device to install on. Nothing else, not apktool, the Andr
 installed on the host. Every script sources `scripts/lib.sh` and invokes its tools through `run_tools`.
 
 Pinned versions, kept in sync between `scripts/lib.sh`, `docker/Dockerfile`, and
-`core/src/com/wazeology/core/Pins.java`: Waze 5.24.0.2 (versionCode 1030730), apktool 2.10.0, Android
+`core/src/com/wazeology/core/Pins.java`: Waze 5.25.5.0 (versionCode 1030738), apktool 2.10.0, Android
 build-tools 34.0.0, platform android-34, apkeep 1.0.0, apksig 8.7.3, and JDK 17. `build-assets.sh` greps the
 pins on all three sides and fails the build when they drift.
 
@@ -174,8 +174,8 @@ We never store Waze in git. `fetch-apk.sh` downloads the **pinned** version insi
 - **apk-pure** (default) needs no credentials. `FetchWaze` (`cli/`) runs the Installer's own APKPure code
   on the host JVM: the same versions lookup, the same `ApkPure.pick` choice of the bundle that carries the
   native split for the first of `ABIS` (default `arm64-v8a`), the same resumable download and SHA-1 check
-  (§8). apkeep is not used here: for 5.24.0.2 it returns the armeabi-v7a + mdpi bundle whatever ABI is
-  asked for. The result is an **XAPK** (a zip of `base` + `config.*` APKs). `scripts/normalize_apks.py`
+  (§8). apkeep is not used here: it ignores the ABI and can return the armeabi-v7a + mdpi bundle (it did for
+  5.24.0.2). The result is an **XAPK** (a zip of `base` + `config.*` APKs). `scripts/normalize_apks.py`
   unpacks it and classifies each inner APK by content, the base is the one that contains `classes.dex`;
   the rest are splits, writing `apk/base.apk` + `apk/split_config.*.apk`.
 - **google-play** (`APK_SOURCE=google-play` + `GOOGLE_EMAIL`/`AAS_TOKEN` in `.env`) goes through `apkeep`
@@ -190,7 +190,7 @@ to `Pins.WAZE_DOWNLOAD_MB`, the figure the Installer shows riders.
 Reproducibility caveat: mirror bytes (apk-pure) may differ from Play. For byte-exact inputs use google-play.
 Either way the *inputs* are pinned to one version; the *outputs* differ only by the local signing key.
 
-Verify identity: `aapt2 dump badging apk/base.apk` shows `package: name='com.waze' versionName='5.24.0.2'`.
+Verify identity: `aapt2 dump badging apk/base.apk` shows `package: name='com.waze' versionName='5.25.5.0'`.
 
 The download is slow, so `fetch-apk.sh` skips it when `apk/base.apk` and the `apk/split_config.*.apk` are
 already in the workspace. Run `FORCE=1 scripts/fetch-apk.sh` to re-download.
@@ -214,10 +214,10 @@ apktool's rebuilt resources (see §3). `apktool.yml` records `minSdk 29`, `targe
 Note `smali_classesN/` maps 1:1 to `classesN.dex`: the classes that were in `classes7.dex` baksmali into
 `smali_classes7/`, and rebuild back into `classes7.dex`. This is why individual reassembled dexes can be
 extracted and shipped as patch assets (§7). A hook lands in whichever dex holds its target class: the nav
-hooks live in `NavigationInfoNativeManager` in `classes7.dex`, the `FreeMapAppActivity` startup hook in
-`classes5.dex`. The assets must carry **every patched hook dex**. `build-assets.sh` derives that set from the
-injected hook markers and asserts it matches `Pins.HOOK_DEXES`, so a hook added to a new dex is never
-silently dropped.
+hooks live in `NavigationInfoNativeManager` and the startup hook in `FreeMapAppActivity`, both in
+`classes7.dex` (in 5.24.0.2 the activity sat in `classes5.dex`). The assets must carry **every patched
+hook dex**. `build-assets.sh` derives that set from the injected hook markers and asserts it matches
+`Pins.HOOK_DEXES`, so a hook added to a new dex is never silently dropped.
 
 ---
 
@@ -274,8 +274,8 @@ Smali details that matter:
 - **Enum name resolution.** `Instruction$Type` extends `java.lang.Enum`, so `invoke-virtual … Enum;->name()`
   yields readable names (`TURN_LEFT`, `KEEP_LEFT`, `ROUNDABOUT_EXIT_LEFT`, …). We map by **name**, not by
   the proto's numeric id, so the mapping is robust to proto-number churn.
-- The reassembled `smali_classes7/` becomes `classes7.dex` (nav hooks) and `smali_classes5/` becomes
-  `classes5.dex` (the `FreeMapAppActivity` startup hook); both are baked into `build/assets` (§7).
+- The reassembled `smali_classes7/` becomes `classes7.dex` (nav hooks + the `FreeMapAppActivity` startup
+  hook), baked into `build/assets` (§7).
 
 `InstructionReporter` (in `payload/java/com/waze/debug/`) is the tiny bridge the hooks call; it forwards to
 the process-wide `ClusterBridge` singleton and swallows every exception so instrumentation can never crash
@@ -365,7 +365,7 @@ host** and baked into `build/assets/` (gitignored, generated), which both target
 the directory as its app assets (`aapt2 link -A build/assets`), and `BuildWaze` reads it through
 `FileAssets`. The names come from `Pins`:
 
-- `patches/classes5.dex` / `patches/classes7.dex`: the **patched** hook dexes, extracted from an
+- `patches/classes7.dex`: the **patched** hook dex, extracted from an
   `apktool b build/base_apktool` reassembly. Every dex a hook touched must be extracted; `build-assets.sh`
   derives the set from the `Lcom/waze/debug/InstructionReporter;->` markers and asserts it equals
   `Pins.HOOK_DEXES`.
@@ -398,7 +398,7 @@ conflicting Waze is installed. The pipeline underneath:
    record holds a 40-hex SHA-1, its size (a varint right after it), the type (`XAPK`/`APK`) and the
    download URL, whose path segment is base64url of `<package>_<versionCode>_<id>`. The app keeps the
    assets whose versionCode is the pinned one. Their order is arbitrary: `x-abis` does not rank them, and
-   5.24.0.2 lists its armeabi-v7a + mdpi bundle before the arm64 + xxxhdpi one. So `ApkPure.pick` reads
+   5.25.5.0 lists its armeabi-v7a + mdpi bundle before the arm64 + xxxhdpi one. So `ApkPure.pick` reads
    each XAPK's zip central directory with a tail `Range` request and takes the first bundle that has the
    `config.<abi>` native split for the device's primary ABI. It skips bundles known to lack it, and falls
    back to one it could not probe only when none is confirmed (the download is checked again after). The fallback is picking files through the
@@ -417,12 +417,12 @@ conflicting Waze is installed. The pipeline underneath:
 3. **Version gate.** `BuildPipeline.inspect` unpacks and classifies the bundle (the base is the apk that contains
    `classes.dex`), then `MiniAxml` (a small hand-rolled binary-XML reader) pulls `package`, `versionCode` and
    `versionName` out of the base's compiled manifest. The patch assets are deterministic only for the pinned
-   build, so anything other than `com.waze` versionCode 1030730 is refused. The dex layout is checked too
+   build, so anything other than `com.waze` versionCode 1030738 is refused. The dex layout is checked too
    (exactly `classes.dex` … `classes10.dex`), which also catches a pre-patched apk, and so is the presence of
    a native split for one of the device's ABIs. Every refusal is a typed `Outcome` the app explains in plain
    words.
 4. **Graft.** `Graft` (pure `java.util.zip`) rewrites a copy of the pristine base, entry by entry: swap
-   `classes5.dex`/`classes7.dex` with the patched assets, swap `AndroidManifest.xml` with `manifest.bin`,
+   `classes7.dex` with the patched asset, swap `AndroidManifest.xml` with `manifest.bin`,
    overwrite the bytes of `res/gBz.xml` with `icon.bin` (skipped with a warning if the entry is absent),
    append `classes11.dex`, and copy everything else with its compression method preserved. Stale
    `META-INF/` v1 signature remnants are dropped. The writer **page-aligns every STORED entry to 4096 bytes**
@@ -553,7 +553,7 @@ The version gate is strict on purpose, because half-matching dexes silently lose
 |---|---|
 | Route card / some screens crash with `InflateException` | apktool rebuilt resources. The graft never ships rebuilt resources (§3/§8); the app refuses any graft whose `resources.arsc` hash changed. |
 | `javac … Unable to find method metafactory` | `android.jar` on `-bootclasspath`. Put it on `-classpath` (§6). |
-| Installer refuses picked files ("That's a different Waze version") | the patch matches one pinned version only (§8, §11). Let the app download it, or pick 5.24.0.2 (versionCode 1030730). |
+| Installer refuses picked files ("That's a different Waze version") | the patch matches one pinned version only (§8, §11). Let the app download it, or pick 5.25.5.0 (versionCode 1030738). |
 | Download fails ("Couldn't download Waze", "APKPure isn't responding") | APKPure dropped the pinned build, changed its API, or the network blocked it. **More → Show details** has the HTTP code or the reason; what was downloaded is kept for the next try. "The download was damaged" means the SHA-1 did not match: try again. Otherwise use **Use Waze files I already have**. |
 | Install says "Another Waze is in the way" or "The Waze on this phone is newer" | a differently signed Waze (or a newer one) is installed. **Remove current Waze**, then install again. |
 | Install succeeds but Waze crashes on launch | should not happen: the build refuses a bundle without a native split for the device. Check the details log for the splits that were installed. |

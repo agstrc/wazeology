@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Bake the patch assets both build targets read into build/assets/: the patched hook dexes
-# (classes5/6.dex), the rebuilt binary AndroidManifest.xml, the compiled launcher icon, the payload dex
+# (classes7.dex), the rebuilt binary AndroidManifest.xml, the compiled launcher icon, the payload dex
 # (classes11.dex) and the signing key (PKCS12). The installer app packs this dir as its assets;
 # BuildWaze reads it on the host. Needs apk/ (fetch-apk.sh) and the patched tree (decompile.sh +
 # patch.sh). Nothing here produces a Waze apk; build-installer.sh and build-waze.sh do.
